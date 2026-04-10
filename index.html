@@ -6,10 +6,14 @@
   <meta charset="UTF-8">
   <meta content="IE=Edge" http-equiv="X-UA-Compatible">
   <meta name="description" content="A new Flutter project.">
+
+  <!-- iOS meta tags & icons -->
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black">
   <meta name="apple-mobile-web-app-title" content="ntpc_garbage_map">
   <link rel="apple-touch-icon" href="icons/Icon-192.png">
+
+  <!-- Favicon -->
   <link rel="icon" type="image/png" href="favicon.png"/>
 
   <title>垃圾車地圖</title>
@@ -45,82 +49,46 @@
       100% { transform: rotate(360deg); }
     }
     .text {
-      font-family: "Segoe UI", Tahoma, Geneva, Verdana, sans-serif;
+      font-family: sans-serif;
       color: #666;
-      font-size: 16px;
-    }
-    #error-display {
-      position: fixed;
-      bottom: 20px;
-      left: 20px;
-      right: 20px;
-      background: rgba(0,0,0,0.8);
-      color: #ff5252;
-      padding: 15px;
-      border-radius: 8px;
-      font-family: monospace;
-      font-size: 12px;
-      display: none;
-      z-index: 10000;
-      box-shadow: 0 4px 12px rgba(0,0,0,0.3);
     }
   </style>
 </head>
 <body>
-  <div id="error-display"></div>
-  
   <div class="loading-container" id="loading">
     <div class="loader"></div>
-    <div class="text" id="status-text">正在載入地圖資源...</div>
+    <div class="text">正在啟動地圖系統...</div>
   </div>
 
   <script>
-    // 錯誤捕捉
-    function showError(msg) {
-      const el = document.getElementById('error-display');
-      el.style.display = 'block';
-      el.innerText = '❌ 啟動失敗: ' + msg;
-    }
-    window.onerror = (m, s, l) => showError(`${m} (${s}:${l})`);
-    window.onunhandledrejection = (e) => showError(e.reason);
-
-    // 1. 注入 Flutter 編譯設定 (關鍵修復)
     if (!window._flutter) {
   window._flutter = {};
 }
 _flutter.buildConfig = {"engineRevision":"425cfb54d01a9472b3e81d9e76fd63a4a44cfbcb","builds":[{"compileTarget":"dart2js","renderer":"canvaskit","mainJsPath":"main.dart.js"},{}]};
 
 
-    // 2. 啟動載入流程
     window.addEventListener('load', function() {
-      const status = document.getElementById('status-text');
-      
       const script = document.createElement('script');
       script.src = 'flutter.js';
       script.onload = () => {
-        status.innerText = "正在初始化引擎...";
-        
         _flutter.loader.load({
           onEntrypointLoaded: async function(engineInitializer) {
-            try {
-              const appRunner = await engineInitializer.initializeEngine({
-                renderer: "html",
-                useColorEmoji: true
-              });
-              
-              status.innerText = "準備就緒，啟動中...";
-              await appRunner.runApp();
-              
-              // 成功啟動後移除載入畫面
-              document.getElementById('loading').style.opacity = '0';
-              setTimeout(() => document.getElementById('loading').remove(), 500);
-            } catch (e) {
-              showError("引擎初始化失敗: " + e);
-            }
+            const appRunner = await engineInitializer.initializeEngine({
+              renderer: "html",
+            });
+            await appRunner.runApp();
+            
+            // 延遲移除載入畫面，確保介面已呈現
+            setTimeout(() => {
+              const loading = document.getElementById('loading');
+              if (loading) {
+                loading.style.opacity = '0';
+                setTimeout(() => loading.remove(), 500);
+              }
+            }, 500);
           }
         });
       };
-      script.onerror = () => showError("無法載入核心組件 (flutter.js)");
       document.body.appendChild(script);
     });
   </script>
