@@ -4,107 +4,57 @@
   <base href="/PWA_GARBAGE/">
   <meta charset="UTF-8">
   <meta content="IE=Edge" http-equiv="X-UA-Compatible">
-  <meta name="description" content="PWA Garbage Map Diagnostic">
-  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black">
   <meta name="apple-mobile-web-app-title" content="垃圾車地圖">
   <link rel="apple-touch-icon" href="icons/Icon-192.png">
-  <link rel="icon" type="image/png" href="favicon.png"/>
-  <title>診斷模式：垃圾車即時地圖</title>
+  <title>台灣垃圾車即時地圖</title>
   <link rel="manifest" href="manifest.json">
   <style>
-    body {
-      background-color: #f0f0f0;
-      font-family: sans-serif;
-      margin: 0;
-      padding: 20px;
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      justify-content: center;
-      min-height: 100vh;
-    }
-    #status-box {
-      background: white;
-      padding: 20px;
-      border-radius: 10px;
-      box-shadow: 0 4px 6px rgba(0,0,0,0.1);
-      width: 320px;
-      word-break: break-all;
-      z-index: 9999;
-      position: relative;
-    }
-    .error { color: red; font-weight: bold; margin-top: 10px; border: 1px solid red; padding: 5px; }
-    .loading { color: orange; }
-    .step { margin-bottom: 5px; font-size: 14px; }
+    body { background: #FFD700; display: flex; align-items: center; justify-content: center; height: 100vh; margin: 0; font-family: sans-serif; }
+    #loader { text-align: center; background: white; padding: 20px; border-radius: 15px; box-shadow: 0 10px 25px rgba(0,0,0,0.2); width: 80%; }
+    .error-box { color: red; text-align: left; font-size: 12px; margin-top: 10px; border-top: 1px solid #eee; padding-top: 10px; display: none; }
   </style>
 </head>
 <body>
-  <div id="status-box">
-    <h3>📱 PWA 診斷啟動中</h3>
-    <div id="steps">
-      <div class="step" id="step1">⏳ 1. 偵測環境中...</div>
-      <div class="step" id="step2">⏳ 2. 載入核心 JS...</div>
-      <div class="step" id="step3">⏳ 3. 初始化引擎...</div>
-      <div class="step" id="step4">⏳ 4. 啟動畫布...</div>
-    </div>
-    <div id="errors"></div>
+  <div id="loader">
+    <h2 id="status">正在啟動地圖...</h2>
+    <p id="sub-status">正在載入核心引擎</p>
+    <div id="error-display" class="error-box"></div>
   </div>
 
+  <script src="flutter.js" defer></script>
   <script>
-    // 註銷所有舊的 Service Worker 以解決死鎖問題
-    if ('serviceWorker' in navigator) {
-      navigator.serviceWorker.getRegistrations().then(function(registrations) {
-        for(let registration of registrations) {
-          registration.unregister();
-          console.log('已註銷 Service Worker:', registration);
+    const status = document.getElementById('status');
+    const subStatus = document.getElementById('sub-status');
+    const errorDisplay = document.getElementById('error-display');
+
+    function reportError(err) {
+      errorDisplay.style.display = 'block';
+      errorDisplay.innerText = '❌ 錯誤回報：' + err;
+      status.innerText = '啟動失敗';
+    }
+
+    window.onerror = (m, s, l) => reportError(m + " (" + l + ")");
+
+    window.addEventListener('load', function() {
+      subStatus.innerText = '正在初始化渲染引擎...';
+      
+      _flutter.loader.load({
+        serviceWorker: null, // 完全禁用 Service Worker 避免快取衝突
+        onEntrypointLoaded: function(engineInitializer) {
+          subStatus.innerText = '正在建立畫布...';
+          engineInitializer.initializeEngine({
+            renderer: "html", // 強制使用 HTML 模式提高相容性
+            useColorEmoji: true
+          }).then(function(appRunner) {
+            subStatus.innerText = '即將進入地圖...';
+            return appRunner.runApp();
+          }).catch(reportError);
         }
       });
-    }
-
-    function setStep(id, status, text) {
-      const el = document.getElementById('step' + id);
-      if (el) el.innerText = status + ' ' + (text || el.innerText.substring(5));
-      console.log('Step ' + id + ': ' + status + ' ' + text);
-    }
-
-    function addError(e) {
-      const div = document.createElement('div');
-      div.className = 'error';
-      div.innerText = '❌ 錯誤：' + e;
-      document.getElementById('errors').appendChild(div);
-      console.error('Diagnostic Error:', e);
-    }
-
-    window.onerror = function(m, s, l, c, e) { 
-      addError(m + ' at ' + l + ':' + c); 
-      setStep(3, '❌', '引擎初始化崩潰');
-    };
-    window.onunhandledrejection = function(e) { 
-      addError('Async: ' + e.reason); 
-      setStep(3, '❌', '非同步初始化失敗');
-    };
-
-    setStep(1, '✅', '環境偵測正常');
-  </script>
-  
-  <script src="flutter_bootstrap.js" async></script>
-  
-  <script>
-    // 透過監聽特定變數或狀態來回報進度
-    window.addEventListener('load', function() {
-      setStep(2, '✅', 'JS 資源已下載');
-      
-      // 監聽引擎初始化進度
-      const _originalInitializeEngine = window._flutter && window._flutter.loader && window._flutter.loader.load;
-      if (window._flutter && window._flutter.loader) {
-        console.log('Flutter loader detected');
-      }
     });
-
-    // 強制設定 HTML 渲染器以增加 iPhone 相容性
-    window.flutterWebRenderer = "html";
   </script>
 </body>
 </html>
