@@ -288,7 +288,12 @@ class NtpcGarbageService extends BaseGarbageService {
   Future<List<GarbageTruck>> fetchTrucks() async {
     try {
       final String timestamp = DateTime.now().millisecondsSinceEpoch.toString();
-      final String requestUrl = '$apiUrl?size=20000&_t=$timestamp';
+      String requestUrl = '$apiUrl?size=20000&_t=$timestamp';
+      
+      // Web 端使用代理
+      if (kIsWeb) {
+        requestUrl = 'https://api.allorigins.win/raw?url=' + Uri.encodeComponent(requestUrl);
+      }
       
       final response = await _client.get(Uri.parse(requestUrl), headers: _headers);
       if (response.statusCode == 200) {
