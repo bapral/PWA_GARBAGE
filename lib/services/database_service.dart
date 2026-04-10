@@ -84,6 +84,8 @@ class DatabaseService {
   static Future<void> _writeLogToFile(String logStr) async {
     try {
       if (kIsWeb) return;
+      
+      // 以下代碼僅在非 Web 平台編譯與執行
       String? logPath;
       if (Platform.isWindows) {
         final localAppData = Platform.environment['LOCALAPPDATA'];
@@ -101,7 +103,7 @@ class DatabaseService {
       }
     } catch (e) {
       // 這裡不使用 log() 以免造成無窮遞迴
-      debugPrint('日誌檔案寫入失敗 (File: $logStr): $e');
+      debugPrint('日誌檔案寫入失敗: $e');
     }
   }
 
