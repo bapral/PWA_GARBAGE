@@ -2,6 +2,7 @@
 <html>
 <head>
   <base href="/PWA_GARBAGE/">
+
   <meta charset="UTF-8">
   <meta content="IE=Edge" http-equiv="X-UA-Compatible">
   <meta name="description" content="A new Flutter project.">
@@ -10,76 +11,116 @@
   <meta name="apple-mobile-web-app-title" content="ntpc_garbage_map">
   <link rel="apple-touch-icon" href="icons/Icon-192.png">
   <link rel="icon" type="image/png" href="favicon.png"/>
+
   <title>垃圾車地圖</title>
   <link rel="manifest" href="manifest.json">
+
   <style>
-    body { background-color: #f3f3f3; margin: 0; padding: 0; display: flex; justify-content: center; align-items: center; height: 100vh; width: 100vw; font-family: sans-serif; }
-    .loading-container { text-align: center; }
-    .loader { border: 6px solid #f3f3f3; border-top: 6px solid #2196F3; border-radius: 50%; width: 50px; height: 50px; animation: spin 1s linear infinite; margin: 0 auto 20px; }
-    @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
-    #status { color: #666; font-size: 14px; margin-top: 10px; }
-    #debug-log { position: fixed; bottom: 0; left: 0; right: 0; background: rgba(0,0,0,0.7); color: #0f0; padding: 5px; font-size: 10px; max-height: 100px; overflow-y: auto; display: block; z-index: 10000; }
+    body {
+      background-color: #f3f3f3;
+      margin: 0;
+      padding: 0;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      height: 100vh;
+      width: 100vw;
+      overflow: hidden;
+    }
+    .loading-container {
+      text-align: center;
+      transition: opacity 0.5s ease;
+    }
+    .loader {
+      border: 6px solid #f3f3f3;
+      border-top: 6px solid #2196F3;
+      border-radius: 50%;
+      width: 50px;
+      height: 50px;
+      animation: spin 1s linear infinite;
+      margin: 0 auto 20px;
+    }
+    @keyframes spin {
+      0% { transform: rotate(0deg); }
+      100% { transform: rotate(360deg); }
+    }
+    .text {
+      font-family: "Segoe UI", Tahoma, Geneva, Verdana, sans-serif;
+      color: #666;
+      font-size: 16px;
+    }
+    #error-display {
+      position: fixed;
+      bottom: 20px;
+      left: 20px;
+      right: 20px;
+      background: rgba(0,0,0,0.8);
+      color: #ff5252;
+      padding: 15px;
+      border-radius: 8px;
+      font-family: monospace;
+      font-size: 12px;
+      display: none;
+      z-index: 10000;
+      box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+    }
   </style>
 </head>
 <body>
-  <div id="debug-log">Debug: Initializing...</div>
+  <div id="error-display"></div>
+  
   <div class="loading-container" id="loading">
     <div class="loader"></div>
-    <div id="status">正在啟動地圖系統...</div>
+    <div class="text" id="status-text">正在載入地圖資源...</div>
   </div>
 
   <script>
-    const logEl = document.getElementById('debug-log');
-    const statusEl = document.getElementById('status');
-    function log(msg, isError = false) {
-      const line = document.createElement('div');
-      line.style.color = isError ? '#ff5252' : '#0f0';
-      line.innerText = `[${new Date().toLocaleTimeString()}] ${msg}`;
-      logEl.appendChild(line);
-      logEl.scrollTop = logEl.scrollHeight;
-      console.log(msg);
+    // 錯誤捕捉
+    function showError(msg) {
+      const el = document.getElementById('error-display');
+      el.style.display = 'block';
+      el.innerText = '❌ 啟動失敗: ' + msg;
     }
+    window.onerror = (m, s, l) => showError(`${m} (${s}:${l})`);
+    window.onunhandledrejection = (e) => showError(e.reason);
 
-    window.onerror = (m, s, l) => log(`❌ 錯誤: ${m} at ${s}:${l}`, true);
-    window.onunhandledrejection = (e) => log(`❌ 非同步錯誤: ${e.reason}`, true);
+    // 1. 注入 Flutter 編譯設定 (關鍵修復)
+    if (!window._flutter) {
+  window._flutter = {};
+}
+_flutter.buildConfig = {"engineRevision":"425cfb54d01a9472b3e81d9e76fd63a4a44cfbcb","builds":[{"compileTarget":"dart2js","renderer":"canvaskit","mainJsPath":"main.dart.js"},{}]};
 
-    log("1. 腳本載入啟動...");
-    
-    // 強制 HTML 渲染
-    window.flutterWebRenderer = "html";
 
-    // 自定義載入邏輯
+    // 2. 啟動載入流程
     window.addEventListener('load', function() {
-      log("2. 視窗載入完成，等待 flutter.js...");
+      const status = document.getElementById('status-text');
       
       const script = document.createElement('script');
       script.src = 'flutter.js';
       script.onload = () => {
-        log("3. flutter.js 下載完成，呼叫 load()...");
+        status.innerText = "正在初始化引擎...";
+        
         _flutter.loader.load({
           onEntrypointLoaded: async function(engineInitializer) {
-            log("4. 入口點已載入，開始初始化引擎...");
-            statusEl.innerText = "正在初始化引擎...";
-            
             try {
               const appRunner = await engineInitializer.initializeEngine({
                 renderer: "html",
                 useColorEmoji: true
               });
               
-              log("5. 引擎初始化完成，開始執行 App...");
-              statusEl.innerText = "地圖繪製中...";
-              
+              status.innerText = "準備就緒，啟動中...";
               await appRunner.runApp();
-              log("🚀 App 啟動成功！");
-              document.getElementById('loading').remove();
+              
+              // 成功啟動後移除載入畫面
+              document.getElementById('loading').style.opacity = '0';
+              setTimeout(() => document.getElementById('loading').remove(), 500);
             } catch (e) {
-              log("❌ 引擎初始化失敗: " + e, true);
+              showError("引擎初始化失敗: " + e);
             }
           }
         });
       };
-      script.onerror = () => log("❌ 無法載入 flutter.js", true);
+      script.onerror = () => showError("無法載入核心組件 (flutter.js)");
       document.body.appendChild(script);
     });
   </script>
