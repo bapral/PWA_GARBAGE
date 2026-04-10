@@ -89,7 +89,7 @@ final currentCityConfigProvider = Provider<CityConfig>((ref) {
       appTitle: '台北市垃圾車即時地圖',
       initialCenter: const LatLng(25.0330, 121.5654),
       themeColor: Colors.blue,
-      localSourceDir: r'D:\CLI\garbage\台北市垃圾車路線',
+      localSourceDir: 'assets/taipei_route.csv',
     );
   } else if (city == 'taichung') {
     return CityConfig(
@@ -97,7 +97,7 @@ final currentCityConfigProvider = Provider<CityConfig>((ref) {
       appTitle: '台中市垃圾車即時地圖',
       initialCenter: const LatLng(24.1477, 120.6736),
       themeColor: Colors.green,
-      localSourceDir: r'D:\CLI\garbage\臺中市定時定點垃圾收運地點',
+      localSourceDir: 'assets/taichung_route.json',
     );
   } else if (city == 'tainan') {
     return CityConfig(
@@ -105,7 +105,7 @@ final currentCityConfigProvider = Provider<CityConfig>((ref) {
       appTitle: '台南市垃圾車即時地圖',
       initialCenter: const LatLng(22.9975, 120.2025),
       themeColor: Colors.orange,
-      localSourceDir: r'D:\CLI\garbage\台南市垃圾車路線',
+      localSourceDir: 'assets/tainan_route.json',
     );
   } else if (city == 'kaohsiung') {
     return CityConfig(
@@ -113,7 +113,7 @@ final currentCityConfigProvider = Provider<CityConfig>((ref) {
       appTitle: '高雄市垃圾車即時地圖',
       initialCenter: const LatLng(22.6273, 120.3014),
       themeColor: Colors.purple,
-      localSourceDir: r'D:\CLI\garbage\高雄市垃圾車路線',
+      localSourceDir: 'assets/kaohsiung_route.json',
     );
   }
   return CityConfig(
@@ -121,7 +121,7 @@ final currentCityConfigProvider = Provider<CityConfig>((ref) {
     appTitle: '新北市垃圾車即時地圖',
     initialCenter: const LatLng(25.0125, 121.4650),
     themeColor: Colors.yellow,
-    localSourceDir: r'D:\CLI\garbage\新北市垃圾車路線',
+    localSourceDir: 'assets/ntpc_route.csv',
   );
 });
 

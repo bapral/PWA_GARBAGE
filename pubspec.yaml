@@ -66,3 +66,10 @@ dev_dependencies:
 # [Flutter 特定設定]
 flutter:
   uses-material-design: true # 啟用 Material Design 視覺語言
+
+  assets:
+    - assets/ntpc_route.csv
+    - assets/taipei_route.json
+    - assets/taichung_route.json
+    - assets/tainan_route.json
+    - assets/kaohsiung_route.json

@@ -54,7 +54,7 @@ class DatabaseService {
         databaseFactory = databaseFactoryFfi;
       }
       
-      String path = kIsWeb ? inMemoryDatabasePath : (_customPath ?? join(await getDatabasesPath(), 'garbage_map_v3.db'));
+      String path = _customPath ?? (kIsWeb ? 'garbage_map_v4.db' : join(await getDatabasesPath(), 'garbage_map_v3.db'));
       
       return await openDatabase(
         path,
@@ -133,8 +133,9 @@ class DatabaseService {
 
   Future<List<GarbageRoutePoint>> findPointsByTime(int hour, int minute, String city) async {
     final database = await db;
-    final String start = _offsetTime(hour, minute, -3);
-    final String end = _offsetTime(hour, minute, 17);
+    // 擴大查詢範圍：前後 30 分鐘，增加預測模式的命中率
+    final String start = _offsetTime(hour, minute, -30);
+    final String end = _offsetTime(hour, minute, 30);
     final List<Map<String, dynamic>> maps = await database.query(
       tableName, 
       where: "arrivalTime >= ? AND arrivalTime <= ? AND city = ?", 

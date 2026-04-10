@@ -18,6 +18,7 @@ import '../models/garbage_route_point.dart';
 import 'database_service.dart';
 import 'ntpc_garbage_service.dart';
 import 'package:package_info_plus/package_info_plus.dart';
+import 'package:flutter/foundation.dart';
 
 /// 高雄市垃圾清運服務類別，負責處理高雄市開放資料的同步與查詢。
 class KaohsiungGarbageService extends BaseGarbageService {
@@ -64,12 +65,13 @@ class KaohsiungGarbageService extends BaseGarbageService {
   /// [debugVersion] 供測試使用的模擬版本號。
   @override
   Future<void> syncDataIfNeeded({void Function(String)? onProgress, String? debugVersion}) async {
-    String currentAppVersion;
+    String currentAppVersion = '1.0.0+1';
     try {
-      final PackageInfo packageInfo = await PackageInfo.fromPlatform();
-      currentAppVersion = '${packageInfo.version}+${packageInfo.buildNumber}';
+      if (!kIsWeb) {
+        final PackageInfo packageInfo = await PackageInfo.fromPlatform();
+        currentAppVersion = '${packageInfo.version}+${packageInfo.buildNumber}';
+      }
     } catch (e) {
-      // 測試環境下的防錯處理
       currentAppVersion = debugVersion ?? 'test_version';
     }
     
@@ -89,7 +91,13 @@ class KaohsiungGarbageService extends BaseGarbageService {
     for (String url in routeApiUrls) {
       try {
         onProgress?.call('連線至 API: $url');
-        final response = await _client.get(Uri.parse(url)).timeout(const Duration(seconds: 30));
+        
+        String targetUrl = url;
+        if (kIsWeb) {
+          targetUrl = 'https://api.allorigins.win/raw?url=' + Uri.encodeComponent(targetUrl);
+        }
+        
+        final response = await _client.get(Uri.parse(targetUrl)).timeout(const Duration(seconds: 30));
         
         if (response.statusCode == 200) {
           final dynamic decoded = json.decode(utf8.decode(response.bodyBytes));

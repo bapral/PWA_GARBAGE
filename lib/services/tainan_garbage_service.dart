@@ -8,7 +8,7 @@
 /// 2. 解析 JSON 內容，將點位座標（LATITUDE/LONGITUDE）與路線資訊轉換為物件。
 /// 3. 使用事務模式批量寫入 SQLite 資料庫。
 /// 4. 呼叫 `fetchTrucks`：定期從 API 獲取最新的垃圾車即時座標。
-/// 5. 提供 `findTrucksByTime` 功能，於網路斷線或預測模式下從資料庫檢索班表。
+/// 5. 提供 `findTrucksByTime` 功能，於網路斷線或預測模式下從資料庫檢檢索班表。
 
 import 'package:latlong2/latlong.dart';
 import 'package:http/http.dart' as http;
@@ -18,6 +18,7 @@ import '../models/garbage_route_point.dart';
 import 'database_service.dart';
 import 'ntpc_garbage_service.dart';
 import 'package:package_info_plus/package_info_plus.dart';
+import 'package:flutter/foundation.dart';
 
 /// [TainanGarbageService] 實作台南市的垃圾車服務邏輯。
 /// 
@@ -50,8 +51,16 @@ class TainanGarbageService extends BaseGarbageService {
   /// [onProgress] 同步進度回調。
   @override
   Future<void> syncDataIfNeeded({void Function(String)? onProgress}) async {
-    final PackageInfo packageInfo = await PackageInfo.fromPlatform();
-    final String currentAppVersion = '${packageInfo.version}+${packageInfo.buildNumber}';
+    String currentAppVersion = '1.0.0+1';
+    try {
+      if (!kIsWeb) {
+        final PackageInfo packageInfo = await PackageInfo.fromPlatform();
+        currentAppVersion = '${packageInfo.version}+${packageInfo.buildNumber}';
+      }
+    } catch (e) {
+      DatabaseService.log('PackageInfo error: $e');
+    }
+    
     final String? storedVersion = await _dbService.getStoredVersion('tainan');
 
     bool needsUpdate = storedVersion != currentAppVersion || !(await _dbService.hasData('tainan'));
@@ -64,7 +73,12 @@ class TainanGarbageService extends BaseGarbageService {
     onProgress?.call('正在啟動台南市 API 同步...');
     
     try {
-      final response = await _client.get(Uri.parse(routeApiUrl)).timeout(const Duration(seconds: 30));
+      String targetUrl = routeApiUrl;
+      if (kIsWeb) {
+        targetUrl = 'https://api.allorigins.win/raw?url=' + Uri.encodeComponent(targetUrl);
+      }
+      
+      final response = await _client.get(Uri.parse(targetUrl)).timeout(const Duration(seconds: 30));
       
       if (response.statusCode == 200) {
         final Map<String, dynamic> data = json.decode(utf8.decode(response.bodyBytes));
@@ -111,7 +125,12 @@ class TainanGarbageService extends BaseGarbageService {
   @override
   Future<List<GarbageTruck>> fetchTrucks() async {
     try {
-      final response = await _client.get(Uri.parse(dynamicApiUrl));
+      String targetUrl = dynamicApiUrl;
+      if (kIsWeb) {
+        targetUrl = 'https://api.allorigins.win/raw?url=' + Uri.encodeComponent(targetUrl);
+      }
+      
+      final response = await _client.get(Uri.parse(targetUrl));
       
       if (response.statusCode == 200) {
         final Map<String, dynamic> data = json.decode(utf8.decode(response.bodyBytes));
