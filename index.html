@@ -53,9 +53,20 @@
   </div>
 
   <script>
+    // 註銷所有舊的 Service Worker 以解決死鎖問題
+    if ('serviceWorker' in navigator) {
+      navigator.serviceWorker.getRegistrations().then(function(registrations) {
+        for(let registration of registrations) {
+          registration.unregister();
+          console.log('已註銷 Service Worker:', registration);
+        }
+      });
+    }
+
     function setStep(id, status, text) {
       const el = document.getElementById('step' + id);
       if (el) el.innerText = status + ' ' + (text || el.innerText.substring(5));
+      console.log('Step ' + id + ': ' + status + ' ' + text);
     }
 
     function addError(e) {
@@ -63,15 +74,19 @@
       div.className = 'error';
       div.innerText = '❌ 錯誤：' + e;
       document.getElementById('errors').appendChild(div);
-      console.error(e);
+      console.error('Diagnostic Error:', e);
     }
 
-    window.onerror = function(m, s, l, c, e) { addError(m + ' at ' + l + ':' + c); };
-    window.onunhandledrejection = function(e) { addError('Async: ' + e.reason); };
+    window.onerror = function(m, s, l, c, e) { 
+      addError(m + ' at ' + l + ':' + c); 
+      setStep(3, '❌', '引擎初始化崩潰');
+    };
+    window.onunhandledrejection = function(e) { 
+      addError('Async: ' + e.reason); 
+      setStep(3, '❌', '非同步初始化失敗');
+    };
 
     setStep(1, '✅', '環境偵測正常');
-
-    // 這裡會由 Flutter 的 build 過程自動處理引擎載入
   </script>
   
   <script src="flutter_bootstrap.js" async></script>
@@ -80,6 +95,12 @@
     // 透過監聽特定變數或狀態來回報進度
     window.addEventListener('load', function() {
       setStep(2, '✅', 'JS 資源已下載');
+      
+      // 監聽引擎初始化進度
+      const _originalInitializeEngine = window._flutter && window._flutter.loader && window._flutter.loader.load;
+      if (window._flutter && window._flutter.loader) {
+        console.log('Flutter loader detected');
+      }
     });
 
     // 強制設定 HTML 渲染器以增加 iPhone 相容性
