@@ -2,100 +2,62 @@
 <html>
 <head>
   <base href="/PWA_GARBAGE/">
+
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <meta content="IE=Edge" http-equiv="X-UA-Compatible">
+  <meta name="description" content="A new Flutter project.">
+
+  <!-- iOS meta tags & icons -->
   <meta name="apple-mobile-web-app-capable" content="yes">
-  <title>超級診斷：垃圾車地圖</title>
+  <meta name="apple-mobile-web-app-status-bar-style" content="black">
+  <meta name="apple-mobile-web-app-title" content="ntpc_garbage_map">
+  <link rel="apple-touch-icon" href="icons/Icon-192.png">
+
+  <!-- Favicon -->
+  <link rel="icon" type="image/png" href="favicon.png"/>
+
+  <title>垃圾車地圖</title>
+  <link rel="manifest" href="manifest.json">
+
   <style>
-    body { background: #333; color: #fff; font-family: monospace; padding: 10px; font-size: 12px; }
-    #log-window { background: #000; border: 1px solid #666; padding: 10px; height: 80vh; overflow-y: scroll; margin-top: 10px; }
-    .log-entry { border-bottom: 1px solid #222; padding: 3px 0; }
-    .success { color: #0f0; }
-    .error { color: #f00; font-weight: bold; }
-    .info { color: #0af; }
-    .header { font-size: 16px; color: #ff0; margin-bottom: 10px; }
+    body {
+      background-color: #f3f3f3;
+      margin: 0;
+      padding: 0;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      height: 100vh;
+      width: 100vw;
+    }
+    .loading-container {
+      text-align: center;
+    }
+    .loader {
+      border: 6px solid #f3f3f3;
+      border-top: 6px solid #2196F3;
+      border-radius: 50%;
+      width: 50px;
+      height: 50px;
+      animation: spin 1s linear infinite;
+      margin: 0 auto 20px;
+    }
+    @keyframes spin {
+      0% { transform: rotate(0deg); }
+      100% { transform: rotate(360deg); }
+    }
+    .text {
+      font-family: sans-serif;
+      color: #666;
+    }
   </style>
 </head>
 <body>
-  <div class="header">📱 引擎深度診斷模式</div>
-  <div id="status">正在準備診斷環境...</div>
-  <div id="log-window"></div>
+  <div class="loading-container" id="loading">
+    <div class="loader"></div>
+    <div class="text">正在啟動地圖系統...</div>
+  </div>
 
-  <script>
-    const logWindow = document.getElementById('log-window');
-    const status = document.getElementById('status');
-
-    function log(msg, type = 'info') {
-      const div = document.createElement('div');
-      div.className = 'log-entry ' + type;
-      div.innerText = '[' + new Date().toLocaleTimeString() + '] ' + msg;
-      logWindow.appendChild(div);
-      logWindow.scrollTop = logWindow.scrollHeight;
-      console.log(msg);
-    }
-
-    window.onerror = (m, s, l, c, e) => {
-      log('❌ 全域錯誤: ' + m + ' (行 ' + l + ')', 'error');
-    };
-
-    window.onunhandledrejection = (e) => {
-      log('❌ 非同步錯誤: ' + e.reason, 'error');
-    };
-
-    log('1. 正在檢測瀏覽器相容性...', 'info');
-    log('   - UserAgent: ' + navigator.userAgent);
-    log('   - ServiceWorker: ' + ('serviceWorker' in navigator));
-    log('   - IndexedDB: ' + (!!window.indexedDB));
-
-    // 強制設定
-    window.flutterWebRenderer = "html";
-    log('2. 已強制設定渲染器為: HTML', 'success');
-
-    log('3. 開始下載 flutter.js...', 'info');
-    const script = document.createElement('script');
-    script.src = 'flutter.js';
-    script.onload = () => {
-      log('✅ flutter.js 下載完成', 'success');
-      
-      log('4. 呼叫 _flutter.loader.load()...', 'info');
-      
-      // 修正：Flutter 3.22+ 需要 _flutter.buildConfig
-      if (!window._flutter) {
-  window._flutter = {};
-}
-_flutter.buildConfig = {"engineRevision":"425cfb54d01a9472b3e81d9e76fd63a4a44cfbcb","builds":[{"compileTarget":"dart2js","renderer":"canvaskit","mainJsPath":"main.dart.js"},{}]};
-
-
-      _flutter.loader.load({
-        onEntrypointLoaded: async function(engineInitializer) {
-          log('✅ 入口點載入完成 (Entrypoint Loaded)', 'success');
-          
-          try {
-            log('5. 開始執行 initializeEngine()...', 'info');
-            status.innerText = '正在初始化引擎 (請稍候)...';
-            
-            const appRunner = await engineInitializer.initializeEngine({
-              renderer: "html",
-              useColorEmoji: true
-            });
-            
-            log('✅ 引擎初始化成功 (AppRunner Ready)', 'success');
-            status.innerText = '引擎已就緒，正在啟動 App...';
-            
-            log('6. 執行 appRunner.runApp()...', 'info');
-            await appRunner.runApp();
-            
-            log('🚀 App 已成功啟動！', 'success');
-            status.innerText = '啟動成功！';
-          } catch (e) {
-            log('❌ 引擎初始化失敗: ' + e, 'error');
-            status.innerText = '初始化失敗';
-          }
-        }
-      });
-    };
-    script.onerror = () => log('❌ 無法下載 flutter.js', 'error');
-    document.body.appendChild(script);
-  </script>
+  <script src="flutter_bootstrap.js" async></script>
 </body>
 </html>
