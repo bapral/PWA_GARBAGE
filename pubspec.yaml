@@ -1,0 +1,68 @@
+# =============================================================================
+# [專案配置檔說明]
+# 本文件 (pubspec.yaml) 為 Flutter 專案的核心配置檔案。
+# 負責定義專案中繼資料、環境限制、外部套件依賴 (Dependencies) 以及資產資源 (Assets)。
+#
+# [各區段功能簡述]
+# 1. 專案基本資訊：包含專案名稱、描述、版本號以及發佈設定。
+# 2. 執行環境 (Environment)：指定 Dart SDK 的版本範圍，確保開發與執行環境一致。
+# 3. 核心依賴 (Dependencies)：應用程式運行所必須的套件，如地圖 (flutter_map)、狀態管理 (riverpod) 等。
+# 4. 開發依賴 (Dev Dependencies)：僅在開發與測試階段需要的工具，不包含在最終發佈的應用程式中。
+# 5. Flutter 資源配置：定義 Material Design 支援、字體、圖片資產等。
+# =============================================================================
+
+name: ntpc_garbage_map # 專案名稱：新北市垃圾車地圖（擴展至全台）
+description: "A new Flutter project." # 專案描述：一個新的 Flutter 專案
+# 以下行防止套件被意外發佈到 pub.dev。這對於私有套件是首選。
+publish_to: 'none' # 如果您希望發佈到 pub.dev，請刪除此行
+
+# 以下定義了應用程式的版本和內部版本號。
+# 版本號是由點分隔的三個數字，例如 1.2.43
+# 後面跟著一個可選的內部版本號，由 + 分隔。
+version: 1.0.0+6
+
+environment:
+  sdk: ^3.11.4 # 指定 Dart SDK 的版本範圍
+
+# [依賴項區段] 
+# 指定專案運作所需的外部套件。
+dependencies:
+  flutter:
+    sdk: flutter # Flutter 核心 SDK
+
+  cupertino_icons: ^1.0.8 # 用於 iOS 風格圖示
+  
+  flutter_riverpod: ^3.3.1 # 狀態管理框架
+  
+  flutter_map: ^8.2.2 # 互動式地圖元件
+  
+  latlong2: ^0.9.1 # 地理座標計算工具
+  
+  http: ^1.6.0 # 網路請求套件
+  
+  geolocator: ^14.0.2 # 獲取 GPS 位置
+  
+  intl: ^0.20.2 # 國際化與格式化工具
+  
+  sqflite: ^2.4.1 # 本地 SQLite 資料庫 (行動端)
+  
+  sqflite_common_ffi: ^2.3.3 # 桌面平台 SQLite 支援
+  
+  path: ^1.9.0 # 檔案路徑處理
+  
+  package_info_plus: ^8.2.1 # 獲取 App 版本資訊
+  
+  csv: ^6.0.0 # 解析 CSV 資料格式
+  sqflite_common_ffi_web: ^1.1.1
+
+# [開發用依賴項]
+# 僅用於開發、自動化測試或靜態分析。
+dev_dependencies:
+  flutter_test:
+    sdk: flutter # 官方測試框架
+
+  flutter_lints: ^6.0.0 # 程式碼風格檢查建議
+
+# [Flutter 特定設定]
+flutter:
+  uses-material-design: true # 啟用 Material Design 視覺語言
