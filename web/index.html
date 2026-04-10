@@ -50,9 +50,6 @@
       font-family: sans-serif;
       color: #666;
     }
-  </style>
-  <style>
-    /* ... 之前的樣式 ... */
     #error-log {
       position: fixed;
       bottom: 10px;
@@ -87,8 +84,11 @@
       el.style.display = 'block';
       el.innerText = '❌ 非同步錯誤: ' + e.reason;
     };
-    console.log("Flutter Bootstrap started...");
+
+    // 強制 HTML 渲染器以提高穩定性
+    window.flutterWebRenderer = "html";
   </script>
+
   <script src="flutter_bootstrap.js" async></script>
 </body>
 </html>
