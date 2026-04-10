@@ -8,7 +8,7 @@
   <meta name="description" content="A new Flutter project.">
 
   <!-- iOS meta tags & icons -->
-  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black">
   <meta name="apple-mobile-web-app-title" content="ntpc_garbage_map">
   <link rel="apple-touch-icon" href="icons/Icon-192.png">
@@ -63,9 +63,6 @@
   <script>
     {{flutter_build_config}}
     
-    // 修復：Web SQL 需要 sqlite3.wasm，從 CDN 載入以解決檔案缺失問題
-    window.sqlite3WasmUrl = "https://cdn.jsdelivr.net/npm/sqlite3-wasm-no-opfs@1.0.0/sqlite3.wasm";
-
     window.addEventListener('load', function() {
       const script = document.createElement('script');
       script.src = 'flutter.js';

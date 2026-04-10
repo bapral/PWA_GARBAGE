@@ -11,7 +11,6 @@
 /// 5. 將整合後的 `GarbageRoutePoint` 存入資料庫以供後續查詢。
 /// 6. 呼叫 `fetchTrucks` 時，直接從台中市 API 獲取最新的動態資料。
 
-import 'dart:io';
 import 'package:latlong2/latlong.dart';
 import 'package:http/http.dart' as http;
 import 'dart:convert';
@@ -20,7 +19,8 @@ import '../models/garbage_route_point.dart';
 import 'database_service.dart';
 import 'ntpc_garbage_service.dart';
 import 'package:package_info_plus/package_info_plus.dart';
-import 'package:path/path.dart';
+import 'package:flutter/services.dart' show rootBundle;
+import 'package:flutter/foundation.dart';
 
 /// [TaichungGarbageService] 負責台中市清運路線與即時車輛位置。
 /// 
@@ -58,8 +58,16 @@ class TaichungGarbageService extends BaseGarbageService {
   /// [onProgress] 同步進度回調。
   @override
   Future<void> syncDataIfNeeded({void Function(String)? onProgress}) async {
-    final PackageInfo packageInfo = await PackageInfo.fromPlatform();
-    final String currentAppVersion = '${packageInfo.version}+${packageInfo.buildNumber}';
+    String currentAppVersion = '1.0.0+1';
+    try {
+      if (!kIsWeb) {
+        final PackageInfo packageInfo = await PackageInfo.fromPlatform();
+        currentAppVersion = '${packageInfo.version}+${packageInfo.buildNumber}';
+      }
+    } catch (e) {
+      DatabaseService.log('PackageInfo error: $e');
+    }
+
     final String? storedVersion = await _dbService.getStoredVersion('taichung');
 
     bool needsUpdate = storedVersion != currentAppVersion || !(await _dbService.hasData('taichung'));
@@ -74,7 +82,13 @@ class TaichungGarbageService extends BaseGarbageService {
     try {
       // 步驟一：建立即時位置映射，確保點位顯示時能附帶車輛位置
       onProgress?.call('步驟 1/3: 下載即時位置快照...');
-      final dynamicResponse = await _client.get(Uri.parse('$dynamicApiUrl&limit=20000')).timeout(const Duration(seconds: 15));
+      
+      String targetDynamicUrl = '$dynamicApiUrl&limit=20000';
+      if (kIsWeb) {
+        targetDynamicUrl = 'https://api.allorigins.win/raw?url=' + Uri.encodeComponent(targetDynamicUrl);
+      }
+      
+      final dynamicResponse = await _client.get(Uri.parse(targetDynamicUrl)).timeout(const Duration(seconds: 15));
       Map<String, LatLng> carPositions = {};
       if (dynamicResponse.statusCode == 200) {
         final List<dynamic> dynamicData = json.decode(dynamicResponse.body);
@@ -88,15 +102,20 @@ class TaichungGarbageService extends BaseGarbageService {
         }
       }
 
-      // 步驟二：讀取本地 JSON 檔案
+      // 步驟二：讀取本地 JSON 檔案 (統一使用 rootBundle)
       onProgress?.call('步驟 2/3: 讀取本地 JSON 資源檔...');
-      final String jsonPath = join(localSourceDir, '0_臺中市定時定點垃圾收運地點.JSON');
-      final File jsonFile = File(jsonPath);
-      if (!await jsonFile.exists()) {
-        throw Exception('資源目錄中缺少關鍵班表檔案: $jsonPath');
+      String content;
+      try {
+        content = await rootBundle.loadString('assets/taichung_route.json');
+      } catch (e) {
+        // 嘗試備援路徑
+        try {
+          content = await rootBundle.loadString('assets/0_臺中市定時定點垃圾收運地點.JSON');
+        } catch (e2) {
+          throw Exception('無法載入台中市班表資源檔 (assets/taichung_route.json)');
+        }
       }
 
-      final String content = await jsonFile.readAsString();
       final List<dynamic> scheduleData = json.decode(content);
       
       onProgress?.call('步驟 3/3: 解析班表並過濾站點 (共 ${scheduleData.length} 筆)...');
@@ -154,7 +173,12 @@ class TaichungGarbageService extends BaseGarbageService {
   Future<List<GarbageTruck>> fetchTrucks() async {
     try {
       final String timestamp = DateTime.now().millisecondsSinceEpoch.toString();
-      final response = await _client.get(Uri.parse('$dynamicApiUrl&limit=20000&_t=$timestamp'));
+      String targetUrl = '$dynamicApiUrl&limit=20000&_t=$timestamp';
+      if (kIsWeb) {
+        targetUrl = 'https://api.allorigins.win/raw?url=' + Uri.encodeComponent(targetUrl);
+      }
+      
+      final response = await _client.get(Uri.parse(targetUrl));
       
       if (response.statusCode == 200) {
         final List<dynamic> results = json.decode(response.body);

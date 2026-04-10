@@ -10,7 +10,6 @@
 /// 4. 若雲端 API 同步失敗，自動轉向讀取 `localSourceDir` 下的 CSV 資源檔案。
 /// 5. 呼叫 `fetchTrucks` 時，優先嘗試即時 API，若失敗則回退至資料庫班表推估。
 
-import 'dart:io';
 import 'dart:convert';
 import 'package:latlong2/latlong.dart';
 import 'package:csv/csv.dart';
@@ -21,6 +20,7 @@ import '../models/garbage_truck.dart';
 import '../models/garbage_route_point.dart';
 import 'database_service.dart';
 import 'ntpc_garbage_service.dart';
+import 'package:flutter/services.dart' show rootBundle;
 
 /// 內部使用的解析封裝物件，用於台北市 Isolate 溝通。
 class _TaipeiParseInput {
@@ -28,57 +28,40 @@ class _TaipeiParseInput {
   const _TaipeiParseInput(this.body);
 }
 
-/// 在獨立 Isolate 中執行台北市即時位置解析。
-List<GarbageTruck> _parseTaipeiTrucksIsolate(_TaipeiParseInput input) {
-  try {
-    final dynamic decoded = json.decode(input.body);
-    List<dynamic> results = [];
+/// 解析台北市 JSON 資料的 Isolate 函式。
+List<GarbageRoutePoint> _parseTaipeiJsonIsolate(_TaipeiParseInput input) {
+  final List<dynamic> data = json.decode(input.body);
+  List<GarbageRoutePoint> points = [];
 
-    if (decoded is List) {
-      results = decoded;
-    } else if (decoded is Map && decoded.containsKey('result')) {
-      results = decoded['result']['results'] ?? [];
-    }
+  for (var item in data) {
+    final double? lat = double.tryParse(item['latitude']?.toString() ?? '');
+    final double? lng = double.tryParse(item['longitude']?.toString() ?? '');
+    final String time = item['time']?.toString() ?? '';
     
-    final now = DateTime.now();
-    return results.map((item) {
-      final String carNo = item['車號']?.toString() ?? item['car']?.toString() ?? '未知車號';
-      final String location = item['地點']?.toString() ?? item['location']?.toString() ?? '行駛中';
-      final String latStr = item['緯度']?.toString() ?? item['latitude']?.toString() ?? '0';
-      final String lonStr = item['經度']?.toString() ?? item['longitude']?.toString() ?? '0';
-      
-      DateTime updateTime = now;
-      final String? timeField = item['點位日期時間']?.toString() ?? item['time']?.toString();
-      if (timeField != null) {
-        updateTime = DateTime.tryParse(timeField) ?? now;
-      }
-
-      return GarbageTruck(
-        carNumber: carNo,
-        lineId: item['路線']?.toString() ?? item['lineid']?.toString() ?? '',
-        location: location,
-        position: LatLng(
-          double.tryParse(latStr) ?? 0, 
-          double.tryParse(lonStr) ?? 0
-        ),
-        updateTime: updateTime,
-      );
-    }).toList();
-  } catch (e) {
-    debugPrint('Taipei Isolate Parse Error: $e');
-    return [];
+    if (lat != null && lng != null && time.isNotEmpty) {
+      points.add(GarbageRoutePoint(
+        lineId: item['lineid']?.toString() ?? '',
+        lineName: item['linename']?.toString() ?? '',
+        rank: int.tryParse(item['rank']?.toString() ?? '0') ?? 0,
+        name: item['name']?.toString() ?? '',
+        position: LatLng(lat, lng),
+        arrivalTime: time,
+      ));
+    }
   }
+  return points;
 }
 
-/// [TaipeiGarbageService] 負責台北市垃圾清運資料的介接。
+/// [TaipeiGarbageService] 負責台北市清運資料同步與即時動態。
 class TaipeiGarbageService extends BaseGarbageService {
-  /// 台北市即時位置與路線 API (JSON)
-  static const String apiUrl = 'https://data.taipei/api/v1/dataset/a6e90031-7ec4-4089-afb5-361a4efe7202?scope=resourceAquire';
+  /// 台北市路線 API (JSON)
+  static const String routeUrl = 'https://data.taipei/api/v1/dataset/fb66099b-00a4-44a5-9273-51616c68e98f?scope=resourceAcknowledge';
+  /// 台北市即時位置 API (JSON)
+  static const String truckUrl = 'https://data.taipei/api/v1/dataset/d394142f-7634-4b4f-8b54-7f4f6e63289a?scope=resourceAcknowledge';
 
   final DatabaseService _dbService = DatabaseService();
   final http.Client _client;
 
-  /// 建構子：初始化台北市服務。
   TaipeiGarbageService({required super.localSourceDir, http.Client? client}) 
       : _client = client ?? http.Client() {
     DatabaseService.log('TaipeiGarbageService 已建立');
@@ -87,138 +70,105 @@ class TaipeiGarbageService extends BaseGarbageService {
   @override
   void dispose() {
     _client.close();
-    DatabaseService.log('TaipeiGarbageService 已釋放資源 (Client closed)');
+    DatabaseService.log('TaipeiGarbageService 已釋放資源');
   }
 
   @override
   Future<void> syncDataIfNeeded({void Function(String)? onProgress}) async {
-    final PackageInfo packageInfo = await PackageInfo.fromPlatform();
-    final String currentAppVersion = '${packageInfo.version}+${packageInfo.buildNumber}';
+    String currentAppVersion = '1.0.0+1';
+    try {
+      if (!kIsWeb) {
+        final PackageInfo packageInfo = await PackageInfo.fromPlatform();
+        currentAppVersion = '${packageInfo.version}+${packageInfo.buildNumber}';
+      }
+    } catch (e) {
+      DatabaseService.log('PackageInfo error: $e');
+    }
+    
     final String? storedVersion = await _dbService.getStoredVersion('taipei');
 
-    bool needsUpdate = storedVersion != currentAppVersion || !(await _dbService.hasData('taipei'));
-    if (!needsUpdate) {
-      onProgress?.call('台北市快取資料已就緒...');
+    if (storedVersion == currentAppVersion && (await _dbService.hasData('taipei'))) {
+      onProgress?.call('台北市資料已為最新...');
       return;
     }
 
-    onProgress?.call('正在從雲端同步台北市清運點位...');
-    bool apiSuccess = await _syncFromApi(onProgress);
-
-    if (apiSuccess) {
-      await _dbService.updateVersion(currentAppVersion, 'taipei');
-      onProgress?.call('台北市路線同步成功 (雲端)。');
-    } else {
-      onProgress?.call('雲端同步失敗，改從本地 CSV 資源匯入...');
-      if (await _importFromLocalCSV(onProgress)) {
-        await _dbService.updateVersion(currentAppVersion, 'taipei');
-        onProgress?.call('台北市路線同步成功 (本地 CSV)。');
-      } else {
-        onProgress?.call('台北市同步失敗，將維持舊有資料。');
-      }
-    }
-  }
-
-  String _formatTime(String timeRaw) {
-    String raw = timeRaw.replaceAll(':', '').trim();
-    if (raw.length == 4) return '${raw.substring(0, 2)}:${raw.substring(2, 4)}';
-    if (raw.length == 3) return '0${raw.substring(0, 1)}:${raw.substring(1, 3)}';
-    return timeRaw.contains(':') ? timeRaw : '00:00';
-  }
-
-  Future<bool> _syncFromApi(void Function(String)? onProgress) async {
+    onProgress?.call('同步台北市資料中...');
+    
     try {
-      final String syncUrl = '$apiUrl&limit=100000';
-      DatabaseService.log('台北市同步請求: $syncUrl');
-      final response = await _client.get(Uri.parse(syncUrl));
+      String targetUrl = routeUrl;
+      if (kIsWeb) {
+        targetUrl = 'https://api.allorigins.win/raw?url=' + Uri.encodeComponent(targetUrl);
+      }
+      
+      final response = await _client.get(Uri.parse(targetUrl)).timeout(const Duration(seconds: 20));
       
       if (response.statusCode == 200) {
-        final dynamic decoded = json.decode(response.body);
-        List<dynamic> results = [];
-        if (decoded is Map && decoded.containsKey('result')) {
-          results = decoded['result']['results'] ?? [];
-        } else if (decoded is List) {
-          results = decoded;
-        }
-
-        DatabaseService.log('台北市同步 API 回傳，共 ${results.length} 筆原始記錄');
-
-        if (results.length > 500) {
-          onProgress?.call('獲取 ${results.length} 筆資料，正在寫入快取...');
-          await _dbService.clearAllRoutePoints('taipei');
-          
-          List<GarbageRoutePoint> batch = [];
-          for (int i = 0; i < results.length; i++) {
-            final item = results[i];
-            final String lineId = item['路線']?.toString() ?? item['lineid']?.toString() ?? '未知路線';
-            final String carNo = item['車號']?.toString() ?? item['car']?.toString() ?? '未知車號';
-            String formattedTime = _formatTime((item['抵達時間']?.toString() ?? '').trim());
-
-            batch.add(GarbageRoutePoint(
-              lineId: '$lineId-$carNo',
-              lineName: '$lineId ($carNo)',
-              rank: i,
-              name: item['地點']?.toString() ?? item['location']?.toString() ?? '未知點',
-              position: LatLng(
-                double.tryParse(item['緯度']?.toString() ?? '0') ?? 0,
-                double.tryParse(item['經度']?.toString() ?? '0') ?? 0,
-              ),
-              arrivalTime: formattedTime,
+        final Map<String, dynamic> root = json.decode(response.body);
+        final List<dynamic> results = root['result']?['results'] ?? [];
+        
+        onProgress?.call('成功解析 ${results.length} 筆資料，寫入中...');
+        
+        List<GarbageRoutePoint> allPoints = [];
+        for (var item in results) {
+          final double? lat = double.tryParse(item['緯度']?.toString() ?? '');
+          final double? lng = double.tryParse(item['經度']?.toString() ?? '');
+          if (lat != null && lng != null) {
+            allPoints.add(GarbageRoutePoint(
+              lineId: item['路線編號']?.toString() ?? '',
+              lineName: item['路線名稱']?.toString() ?? '',
+              rank: int.tryParse(item['序號']?.toString() ?? '0') ?? 0,
+              name: item['地點名稱']?.toString() ?? '',
+              position: LatLng(lat, lng),
+              arrivalTime: item['抵達時間']?.toString() ?? '',
             ));
-
-            if (batch.length >= 2000) {
-              await _dbService.saveRoutePoints(batch, 'taipei');
-              batch.clear();
-              onProgress?.call('寫入進度: $i / ${results.length}...');
-            }
           }
-          if (batch.isNotEmpty) await _dbService.saveRoutePoints(batch, 'taipei');
-          return true;
         }
+        
+        await _dbService.clearAndSaveRoutePoints(allPoints, 'taipei');
+        await _dbService.updateVersion(currentAppVersion, 'taipei');
+        onProgress?.call('台北市資料同步完成！');
+      } else {
+        throw Exception('API 回傳錯誤');
       }
-    } catch (e, stack) {
-      DatabaseService.log('台北市 API 同步異常', error: e, stackTrace: stack);
+    } catch (e) {
+      DatabaseService.log('台北市 API 同步失敗，嘗試本地備援', error: e);
+      if (await _importFromLocalCSV(onProgress)) {
+        await _dbService.updateVersion(currentAppVersion, 'taipei');
+        onProgress?.call('台北市資料同步完成 (本地備援)！');
+      } else {
+        onProgress?.call('台北市資料同步失敗。');
+      }
     }
-    return false;
   }
 
   Future<bool> _importFromLocalCSV(void Function(String)? onProgress) async {
-    if (kIsWeb) return false;
     try {
-      final dir = Directory(localSourceDir);
-      if (!await dir.exists()) return false;
-      final files = await dir.list().toList();
-      final csvFile = files.cast<FileSystemEntity?>().firstWhere(
-        (f) => f != null && f.path.toLowerCase().endsWith('.csv'),
-        orElse: () => null
-      ) as File?;
-
-      if (csvFile == null) return false;
-      final String csvContent = await csvFile.readAsString();
-      final List<List<dynamic>> fields = const CsvToListConverter(shouldParseNumbers: false, eol: '\n').convert(csvContent);
-      if (fields.isEmpty) return false;
+      String csvContent;
+      try {
+        csvContent = await rootBundle.loadString('assets/taipei_route.csv');
+      } catch (e) {
+        DatabaseService.log('無法載入台北市本地 CSV: $e');
+        return false;
+      }
       
-      List<GarbageRoutePoint> batch = [];
+      final List<List<dynamic>> fields = const CsvToListConverter().convert(csvContent);
+      if (fields.length <= 1) return false;
+
+      List<GarbageRoutePoint> points = [];
       for (int i = 1; i < fields.length; i++) {
         final row = fields[i];
-        if (row.length < 8) continue;
-        batch.add(GarbageRoutePoint(
-          lineId: '${row[5]}-${row[4]}', 
-          lineName: '${row[5]} (${row[4]})',
-          rank: i, 
-          name: row[9].toString(),
-          position: LatLng(double.tryParse(row[11].toString()) ?? 0, double.tryParse(row[10].toString()) ?? 0),
-          arrivalTime: _formatTime(row[7].toString()),
+        points.add(GarbageRoutePoint(
+          lineId: row[0].toString(),
+          lineName: row[1].toString(),
+          rank: int.tryParse(row[2].toString()) ?? 0,
+          name: row[3].toString(),
+          position: LatLng(double.tryParse(row[4].toString()) ?? 0, double.tryParse(row[5].toString()) ?? 0),
+          arrivalTime: row[6].toString(),
         ));
-        if (batch.length >= 2000) {
-          await _dbService.saveRoutePoints(batch, 'taipei');
-          batch.clear();
-        }
       }
-      if (batch.isNotEmpty) await _dbService.saveRoutePoints(batch, 'taipei');
+      await _dbService.clearAndSaveRoutePoints(points, 'taipei');
       return true;
     } catch (e) {
-      DatabaseService.log('台北市本地 CSV 匯入異常', error: e);
       return false;
     }
   }
@@ -226,30 +176,40 @@ class TaipeiGarbageService extends BaseGarbageService {
   @override
   Future<List<GarbageTruck>> fetchTrucks() async {
     try {
-      final String timestamp = DateTime.now().millisecondsSinceEpoch.toString();
-      final String requestUrl = '$apiUrl&limit=20000&_t=$timestamp';
-      final response = await _client.get(Uri.parse(requestUrl));
-      if (response.statusCode == 200) {
-        return await compute(_parseTaipeiTrucksIsolate, _TaipeiParseInput(response.body));
+      String targetUrl = truckUrl;
+      if (kIsWeb) {
+        targetUrl = 'https://api.allorigins.win/raw?url=' + Uri.encodeComponent(targetUrl);
       }
-    } catch (e) {
-      DatabaseService.log('台北市即時 API 連線異常', error: e);
-    }
-    return await findTrucksByTime(DateTime.now().hour, DateTime.now().minute);
+      
+      final response = await _client.get(Uri.parse(targetUrl));
+      if (response.statusCode == 200) {
+        final Map<String, dynamic> root = json.decode(response.body);
+        final List<dynamic> results = root['result']?['results'] ?? [];
+        
+        return results.map((item) => GarbageTruck(
+          carNumber: item['車號']?.toString() ?? '未知',
+          lineId: item['路線編號']?.toString() ?? '',
+          location: item['位置描述']?.toString() ?? '',
+          position: LatLng(double.tryParse(item['緯度']?.toString() ?? '0') ?? 0, double.tryParse(item['經度']?.toString() ?? '0') ?? 0),
+          updateTime: DateTime.tryParse(item['最後更新時間']?.toString() ?? '') ?? DateTime.now(),
+        )).toList();
+      }
+    } catch (_) {}
+    
+    final now = DateTime.now();
+    return await findTrucksByTime(now.hour, now.minute);
   }
 
   @override
   Future<List<GarbageTruck>> findTrucksByTime(int hour, int minute) async {
     final points = await _dbService.findPointsByTime(hour, minute, 'taipei');
-    final now = DateTime.now();
-    return points.map((p) {
-      DateTime scheduledTime = now;
-      try {
-        final parts = p.arrivalTime.split(':');
-        if (parts.length == 2) scheduledTime = DateTime(now.year, now.month, now.day, int.parse(parts[0]), int.parse(parts[1]));
-      } catch (_) {}
-      return GarbageTruck(carNumber: '預定車', lineId: p.lineId, location: '${p.lineName} - ${p.name}', position: p.position, updateTime: scheduledTime);
-    }).toList();
+    return points.map((p) => GarbageTruck(
+      carNumber: '預定車',
+      lineId: p.lineId,
+      location: p.name,
+      position: p.position,
+      updateTime: DateTime.now(),
+    )).toList();
   }
 
   @override

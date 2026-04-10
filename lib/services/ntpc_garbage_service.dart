@@ -20,7 +20,7 @@ import '../models/garbage_route_point.dart';
 import 'database_service.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 import 'package:csv/csv.dart';
-import 'dart:io';
+import 'package:flutter/services.dart' show rootBundle;
 import 'package:flutter/foundation.dart';
 
 /// [BaseGarbageService] 是所有城市垃圾清運服務的基底抽象類別。
@@ -227,13 +227,16 @@ class NtpcGarbageService extends BaseGarbageService {
   /// [onProgress] 進度回報。
   /// 回傳是否成功。
   Future<bool> _importFromLocalCSV(void Function(String)? onProgress) async {
-    if (kIsWeb) return false;
     try {
-      final directory = Directory(localSourceDir);
-      if (!await directory.exists()) return false;
-      final files = await directory.list().toList();
-      final csvFile = files.firstWhere((f) => f.path.toLowerCase().endsWith('.csv')) as File;
-      final String csvContent = await csvFile.readAsString();
+      String csvContent;
+      // 統一使用 rootBundle 以符合 PWA 與原生架構，不再使用 dart:io
+      try {
+        csvContent = await rootBundle.loadString('assets/ntpc_route.csv');
+      } catch (e) {
+        DatabaseService.log('rootBundle 載入失敗 (ntpc_route.csv): $e');
+        return false;
+      }
+
       final List<List<dynamic>> fields = const CsvToListConverter(shouldParseNumbers: false, eol: '\n').convert(csvContent);
       if (fields.isEmpty) return false;
 
@@ -277,6 +280,7 @@ class NtpcGarbageService extends BaseGarbageService {
       if (batch.isNotEmpty) await _dbService.saveRoutePoints(batch, 'ntpc');
       return true;
     } catch (e) {
+      DatabaseService.log('本地匯入崩潰', error: e);
       return false;
     }
   }

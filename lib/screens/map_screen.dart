@@ -16,6 +16,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart';
 import 'package:geolocator/geolocator.dart';
+import 'package:flutter/foundation.dart';
 import '../providers/garbage_provider.dart';
 import '../models/garbage_truck.dart';
 import '../services/database_service.dart';
@@ -37,6 +38,9 @@ class MapScreen extends ConsumerStatefulWidget {
 class _MapScreenState extends ConsumerState<MapScreen> {
   // 地圖控制器，用於控制地圖縮放、移動等
   final MapController _mapController = MapController();
+  
+  // 標記地圖是否已就緒，避免 MapController 在 Widget 渲染前被調用
+  bool _isMapReady = false;
   
   // 目前使用者的 GPS 位置（自動定位模式下使用）
   Position? _userPosition; 
@@ -88,11 +92,11 @@ class _MapScreenState extends ConsumerState<MapScreen> {
         _userPosition = pos;
       });
       // 若目前的定位模式為「自動」，地圖視野將自動移動至使用者所在位置
-      if (ref.read(locationModeProvider) == LocationMode.auto) {
+      if (ref.read(locationModeProvider) == LocationMode.auto && _isMapReady) {
         try {
           _mapController.move(LatLng(pos.latitude, pos.longitude), 15);
         } catch (e) {
-          debugPrint('MapController 尚未就緒: $e');
+          debugPrint('MapController 移動失敗: $e');
         }
       }
     }
@@ -215,9 +219,11 @@ class _MapScreenState extends ConsumerState<MapScreen> {
               CircularProgressIndicator(strokeWidth: 6, color: config.themeColor[800]),
               const SizedBox(height: 30),
               Text(progressMsg, style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold), textAlign: TextAlign.center),
-              const SizedBox(height: 15),
-              const Text('若遇到卡住，可檢查日誌檔案：', style: TextStyle(color: Colors.grey, fontSize: 12)),
-              const SelectionArea(child: Text('C:\\Users\\bapral\\AppData\\Local\\garbage_map_debug.log', style: TextStyle(color: Colors.blueGrey, fontSize: 10))),
+              if (!kIsWeb) ...[
+                const SizedBox(height: 15),
+                const Text('若遇到卡住，可檢查日誌檔案：', style: TextStyle(color: Colors.grey, fontSize: 12)),
+                const SelectionArea(child: Text('App Data Local / garbage_map_debug.log', style: TextStyle(color: Colors.blueGrey, fontSize: 10))),
+              ],
             ],
           ),
         ),
@@ -360,6 +366,16 @@ class _MapScreenState extends ConsumerState<MapScreen> {
               options: MapOptions(
                 initialCenter: config.initialCenter,
                 initialZoom: 14.0,
+                onMapReady: () {
+                  setState(() {
+                    _isMapReady = true;
+                  });
+                  DatabaseService.log('FlutterMap 已就緒');
+                  // 地圖就緒後，若已有定位且為自動模式，則移動視角
+                  if (_userPosition != null && ref.read(locationModeProvider) == LocationMode.auto) {
+                    _mapController.move(LatLng(_userPosition!.latitude, _userPosition!.longitude), 15);
+                  }
+                },
                 onTap: (_, point) {
                   if (ref.read(locationModeProvider) == LocationMode.manual) {
                     DatabaseService.log('手動指定位置: ${point.latitude}, ${point.longitude}');
@@ -638,8 +654,14 @@ class _MapScreenState extends ConsumerState<MapScreen> {
   void _onCityChanged() {
     _clearAllPolylines();
     final config = ref.read(currentCityConfigProvider);
-    DatabaseService.log('縣市已變更，移動地圖中心至: ${config.initialCenter}');
-    _mapController.move(config.initialCenter, 14.0);
+    DatabaseService.log('縣市已變更，嘗試移動地圖中心至: ${config.initialCenter}');
+    if (_isMapReady) {
+      try {
+        _mapController.move(config.initialCenter, 14.0);
+      } catch (e) {
+        debugPrint('MapController 移動失敗 (切換縣市): $e');
+      }
+    }
   }
 
   /// 顯示預測模式選擇選單。
