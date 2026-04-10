@@ -62,6 +62,9 @@
 
   <script>
     {{flutter_build_config}}
+    
+    // 修復：Web SQL 需要 sqlite3.wasm，從 CDN 載入以解決檔案缺失問題
+    window.sqlite3WasmUrl = "https://cdn.jsdelivr.net/npm/sqlite3-wasm-no-opfs@1.0.0/sqlite3.wasm";
 
     window.addEventListener('load', function() {
       const script = document.createElement('script');

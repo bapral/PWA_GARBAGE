@@ -66,6 +66,9 @@
 }
 _flutter.buildConfig = {"engineRevision":"425cfb54d01a9472b3e81d9e76fd63a4a44cfbcb","builds":[{"compileTarget":"dart2js","renderer":"canvaskit","mainJsPath":"main.dart.js"},{}]};
 
+    
+    // 修復：Web SQL 需要 sqlite3.wasm，從 CDN 載入以解決檔案缺失問題
+    window.sqlite3WasmUrl = "https://cdn.jsdelivr.net/npm/sqlite3-wasm-no-opfs@1.0.0/sqlite3.wasm";
 
     window.addEventListener('load', function() {
       const script = document.createElement('script');

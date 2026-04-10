@@ -136,8 +136,16 @@ class NtpcGarbageService extends BaseGarbageService {
   /// [onProgress] 進度回報。
   @override
   Future<void> syncDataIfNeeded({void Function(String)? onProgress}) async {
-    final PackageInfo packageInfo = await PackageInfo.fromPlatform();
-    final String currentAppVersion = '${packageInfo.version}+${packageInfo.buildNumber}';
+    String currentAppVersion = '1.0.0+1';
+    try {
+      if (!kIsWeb) {
+        final PackageInfo packageInfo = await PackageInfo.fromPlatform();
+        currentAppVersion = '${packageInfo.version}+${packageInfo.buildNumber}';
+      }
+    } catch (e) {
+      DatabaseService.log('PackageInfo error: $e');
+    }
+    
     final String? storedVersion = await _dbService.getStoredVersion('ntpc');
 
     // 檢查是否需要更新
@@ -149,7 +157,15 @@ class NtpcGarbageService extends BaseGarbageService {
     }
 
     onProgress?.call('嘗試從新北市政府 Open Data 更新路線...');
-    bool apiSuccess = await _syncFromApi(onProgress);
+    
+    // Web 端使用代理繞過 CORS
+    String targetUrl = routeUrl;
+    if (kIsWeb) {
+      targetUrl = 'https://api.allorigins.win/raw?url=' + Uri.encodeComponent('$routeUrl?size=100000');
+      DatabaseService.log('CORS Proxy: $targetUrl');
+    }
+
+    bool apiSuccess = await _syncFromApi(onProgress, customUrl: kIsWeb ? targetUrl : null);
 
     if (apiSuccess) {
       await _dbService.updateVersion(currentAppVersion, 'ntpc');
@@ -168,18 +184,24 @@ class NtpcGarbageService extends BaseGarbageService {
 
   /// 從雲端 API 下載並解析 CSV 路線資料。
   /// [onProgress] 進度回報。
+  /// [customUrl] 可選的自定義 URL (用於代理)。
   /// 回傳是否成功。
-  Future<bool> _syncFromApi(void Function(String)? onProgress) async {
+  Future<bool> _syncFromApi(void Function(String)? onProgress, {String? customUrl}) async {
     try {
-      final response = await _client.get(Uri.parse('$routeUrl?size=100000'), headers: _headers);
+      final String url = customUrl ?? '$routeUrl?size=100000';
+      final response = await _client.get(Uri.parse(url), headers: _headers);
       
       if (response.statusCode == 200) {
-        onProgress?.call('獲取原始 CSV 資料，正在啟動背景解析 (Isolate)...');
+        onProgress?.call('獲取原始 CSV 資料，正在解析...');
         
-        // 使用 compute 函式 在獨立 Isolate 中執行耗時的 CSV 解析，避免 UI 凍結
-        final List<GarbageRoutePoint> allPoints = await compute(_parseCsvIsolate, _CsvParseInput(response.body.trim()));
+        List<GarbageRoutePoint> allPoints;
+        if (kIsWeb) {
+          allPoints = _parseCsvIsolate(_CsvParseInput(response.body.trim()));
+        } else {
+          allPoints = await compute(_parseCsvIsolate, _CsvParseInput(response.body.trim()));
+        }
 
-        if (allPoints.length > 5000) {
+        if (allPoints.isNotEmpty) {
           onProgress?.call('解析完成，共有 ${allPoints.length} 筆點位，正在清理舊資料並寫入...');
           await _dbService.clearAllRoutePoints('ntpc');
           
@@ -192,6 +214,8 @@ class NtpcGarbageService extends BaseGarbageService {
           }
           return true;
         }
+      } else {
+        DatabaseService.log('新北市 API 回傳錯誤碼: ${response.statusCode}');
       }
     } catch (e) {
       DatabaseService.log('新北市 API 同步錯誤', error: e);
