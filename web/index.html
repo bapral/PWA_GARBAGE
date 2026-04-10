@@ -51,13 +51,44 @@
       color: #666;
     }
   </style>
+  <style>
+    /* ... 之前的樣式 ... */
+    #error-log {
+      position: fixed;
+      bottom: 10px;
+      left: 10px;
+      background: rgba(0,0,0,0.8);
+      color: #ff5252;
+      padding: 10px;
+      border-radius: 5px;
+      font-family: monospace;
+      font-size: 12px;
+      display: none;
+      max-width: 90%;
+      z-index: 9999;
+    }
+  </style>
 </head>
 <body>
+  <div id="error-log"></div>
   <div class="loading-container" id="loading">
     <div class="loader"></div>
     <div class="text">正在啟動地圖系統...</div>
   </div>
 
+  <script>
+    window.onerror = function(m, s, l, c, e) {
+      const el = document.getElementById('error-log');
+      el.style.display = 'block';
+      el.innerText = '❌ 載入錯誤: ' + m + '\n位置: ' + s + ':' + l;
+    };
+    window.onunhandledrejection = function(e) {
+      const el = document.getElementById('error-log');
+      el.style.display = 'block';
+      el.innerText = '❌ 非同步錯誤: ' + e.reason;
+    };
+    console.log("Flutter Bootstrap started...");
+  </script>
   <script src="flutter_bootstrap.js" async></script>
 </body>
 </html>
