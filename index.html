@@ -1,50 +1,89 @@
 <!DOCTYPE html>
 <html>
 <head>
-  <!--
-    If you are serving your web app in a path other than the root, change the
-    href value below to reflect the base path you are serving from.
-
-    The path provided below has to start and end with a slash "/" in order for
-    it to work correctly.
-
-    For more details:
-    * https://developer.mozilla.org/en-US/docs/Web/HTML/Element/base
-
-    This is a placeholder for base href that will be replaced by the value of
-    the `--base-href` argument provided to `flutter build`.
-  -->
   <base href="/PWA_GARBAGE/">
-
   <meta charset="UTF-8">
   <meta content="IE=Edge" http-equiv="X-UA-Compatible">
-  <meta name="description" content="A new Flutter project.">
-
-  <!-- iOS meta tags & icons -->
+  <meta name="description" content="PWA Garbage Map Diagnostic">
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black">
   <meta name="apple-mobile-web-app-title" content="垃圾車地圖">
   <link rel="apple-touch-icon" href="icons/Icon-192.png">
-
-  <!-- Favicon -->
   <link rel="icon" type="image/png" href="favicon.png"/>
-
-  <title>台灣垃圾車即時地圖</title>
+  <title>診斷模式：垃圾車即時地圖</title>
   <link rel="manifest" href="manifest.json">
+  <style>
+    body {
+      background-color: #f0f0f0;
+      font-family: sans-serif;
+      margin: 0;
+      padding: 20px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      min-height: 100vh;
+    }
+    #status-box {
+      background: white;
+      padding: 20px;
+      border-radius: 10px;
+      box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+      width: 320px;
+      word-break: break-all;
+      z-index: 9999;
+      position: relative;
+    }
+    .error { color: red; font-weight: bold; margin-top: 10px; border: 1px solid red; padding: 5px; }
+    .loading { color: orange; }
+    .step { margin-bottom: 5px; font-size: 14px; }
+  </style>
 </head>
 <body>
-  <!--
-    You can customize the "flutter_bootstrap.js" script.
-    This is useful to provide a custom configuration to the Flutter loader
-    or to give the user feedback during the initialization process.
+  <div id="status-box">
+    <h3>📱 PWA 診斷啟動中</h3>
+    <div id="steps">
+      <div class="step" id="step1">⏳ 1. 偵測環境中...</div>
+      <div class="step" id="step2">⏳ 2. 載入核心 JS...</div>
+      <div class="step" id="step3">⏳ 3. 初始化引擎...</div>
+      <div class="step" id="step4">⏳ 4. 啟動畫布...</div>
+    </div>
+    <div id="errors"></div>
+  </div>
 
-    For more details:
-    * https://docs.flutter.dev/platform-integration/web/initialization
-  -->
   <script>
+    function setStep(id, status, text) {
+      const el = document.getElementById('step' + id);
+      if (el) el.innerText = status + ' ' + (text || el.innerText.substring(5));
+    }
+
+    function addError(e) {
+      const div = document.createElement('div');
+      div.className = 'error';
+      div.innerText = '❌ 錯誤：' + e;
+      document.getElementById('errors').appendChild(div);
+      console.error(e);
+    }
+
+    window.onerror = function(m, s, l, c, e) { addError(m + ' at ' + l + ':' + c); };
+    window.onunhandledrejection = function(e) { addError('Async: ' + e.reason); };
+
+    setStep(1, '✅', '環境偵測正常');
+
+    // 這裡會由 Flutter 的 build 過程自動處理引擎載入
+  </script>
+  
+  <script src="flutter_bootstrap.js" async></script>
+  
+  <script>
+    // 透過監聽特定變數或狀態來回報進度
+    window.addEventListener('load', function() {
+      setStep(2, '✅', 'JS 資源已下載');
+    });
+
+    // 強制設定 HTML 渲染器以增加 iPhone 相容性
     window.flutterWebRenderer = "html";
   </script>
-  <script src="flutter_bootstrap.js" async></script>
 </body>
 </html>
