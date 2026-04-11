@@ -48,6 +48,9 @@ class _CsvParseInput { final String csvBody; const _CsvParseInput(this.csvBody);
 class NtpcGarbageService extends BaseGarbageService {
   static const String apiUrl = 'https://data.ntpc.gov.tw/api/datasets/28ab4122-60e1-4065-98e5-abccb69aaca6/csv';
   static const String routeUrl = 'https://data.ntpc.gov.tw/api/datasets/edc3ad26-8ae7-4916-a00b-bc6048d19bf8/csv';
+  
+  static const String requiredAssetVersion = '20260411_v2'; 
+
   static const Map<String, String> _headers = {
     'User-Agent': 'Mozilla/5.0', 'Accept': 'text/csv, application/json', 'Referer': 'https://data.ntpc.gov.tw/',
   };
@@ -62,13 +65,15 @@ class NtpcGarbageService extends BaseGarbageService {
 
   @override
   Future<void> syncDataIfNeeded({bool force = false, void Function(String)? onProgress}) async {
+    final String? storedVersion = await _dbService.getStoredVersion('ntpc');
     final int currentCount = await _dbService.getTotalCount('ntpc');
 
     if (!force) {
-      // [智能補全]：若無資料或筆數明顯過少 (少於 20,000)，自動升級載入完整 Assets
-      if (currentCount < 20000) {
-        onProgress?.call('偵測到資料版本過舊，正在升級新北市預設點位...');
-        await _importFromLocalCSV(onProgress);
+      if (storedVersion != requiredAssetVersion || currentCount < 20000) {
+        onProgress?.call('偵測到資料版本過舊，正在升級新北市完整班表資產...');
+        if (await _importFromLocalCSV(onProgress)) {
+          await _dbService.updateVersion(requiredAssetVersion, 'ntpc');
+        }
       }
       return;
     }

@@ -1,6 +1,6 @@
 /// [整體程式說明]
 /// 本文件定義了台北市（Taipei）的垃圾清運服務實作。
-/// 支援手動強制更新（分頁抓取）與自動智能補全（Assets）。
+/// 支援手動強制更新（分頁抓取）與自動強制版本升級（Assets）。
 
 import 'dart:convert';
 import 'dart:async';
@@ -49,6 +49,9 @@ class TaipeiGarbageService extends BaseGarbageService {
   static const String routeUrl = 'https://data.taipei/api/v1/dataset/a6e90031-7ec4-4089-afb5-361a4efe7202?scope=resourceAquire';
   static const String truckUrl = 'https://data.taipei/api/v1/dataset/d394142f-7634-4b4f-8b54-7f4f6e63289a?scope=resourceAcknowledge';
 
+  // [重要] 資產版本號，每次更新 assets/*.json 後增加此數字可強制所有使用者升級
+  static const String requiredAssetVersion = '20260411_v2'; 
+
   final DatabaseService _dbService = DatabaseService();
   final http.Client _client;
 
@@ -59,18 +62,21 @@ class TaipeiGarbageService extends BaseGarbageService {
 
   @override
   Future<void> syncDataIfNeeded({bool force = false, void Function(String)? onProgress}) async {
+    final String? storedVersion = await _dbService.getStoredVersion('taipei');
     final int currentCount = await _dbService.getTotalCount('taipei');
 
+    // [判斷邏輯]：若非強制更新，檢查資料庫是否已有「最新版資產」且「筆數正常」
     if (!force) {
-      // [智能載入]：如果沒資料，或資料筆數低於預期（舊版的 1000 筆），則自動從 Assets 載入
-      if (currentCount < 2000) {
-        onProgress?.call('偵測到舊版快取，正在升級台北市預設點位...');
-        await _importFromLocalJson(onProgress);
+      if (storedVersion != requiredAssetVersion || currentCount < 3000) {
+        onProgress?.call('正在升級台北市完整班表資產...');
+        if (await _importFromLocalJson(onProgress)) {
+          await _dbService.updateVersion(requiredAssetVersion, 'taipei');
+        }
       }
       return;
     }
 
-    onProgress?.call('正在連線台北市政府 API 執行完整同步...');
+    onProgress?.call('正在連線台北市政府 API 執行分頁同步...');
     List<GarbageRoutePoint> allPoints = [];
     bool apiSuccess = false;
     const int pageSize = 1000;
@@ -84,7 +90,6 @@ class TaipeiGarbageService extends BaseGarbageService {
         final List<GarbageRoutePoint> pagePoints = await compute(_parseTaipeiJsonIsolate, _TaipeiParseInput(response.body));
         if (pagePoints.isEmpty) break;
         allPoints.addAll(pagePoints);
-        onProgress?.call('已累積獲取: ${allPoints.length} 筆點位');
         if (pagePoints.length < 500) break; 
       }
       if (allPoints.isNotEmpty) {
@@ -96,9 +101,13 @@ class TaipeiGarbageService extends BaseGarbageService {
       DatabaseService.log('Taipei Paged Sync Error', error: e);
     }
 
-    if (!apiSuccess) {
+    if (apiSuccess) {
+      await _dbService.updateVersion('manual_sync_${DateTime.now().millisecondsSinceEpoch}', 'taipei');
+    } else {
       onProgress?.call('雲端連線失敗，改從內建資料恢復...');
-      await _importFromLocalJson(onProgress);
+      if (await _importFromLocalJson(onProgress)) {
+        await _dbService.updateVersion(requiredAssetVersion, 'taipei');
+      }
     }
   }
 
@@ -117,29 +126,35 @@ class TaipeiGarbageService extends BaseGarbageService {
   @override
   Future<List<GarbageTruck>> fetchTrucks() async {
     try {
-      String targetUrl = truckUrl + '&limit=1000';
-      if (kIsWeb) targetUrl = 'https://api.allorigins.win/raw?url=' + Uri.encodeComponent(targetUrl);
-      final response = await _client.get(Uri.parse(targetUrl)).timeout(const Duration(seconds: 10));
-      if (response.statusCode == 200) {
+      // [優化]：即時資料也採用分頁，確保全台北市的車都能抓到
+      List<GarbageTruck> allTrucks = [];
+      for (int offset = 0; offset <= 2000; offset += 1000) {
+        String targetUrl = '$truckUrl&limit=1000&offset=$offset';
+        if (kIsWeb) targetUrl = 'https://api.allorigins.win/raw?url=' + Uri.encodeComponent(targetUrl);
+        final response = await _client.get(Uri.parse(targetUrl)).timeout(const Duration(seconds: 8));
+        if (response.statusCode != 200) break;
+        
         final Map<String, dynamic> root = json.decode(response.body);
         final List<dynamic> results = root['result']?['results'] ?? [];
-        List<GarbageTruck> trucks = [];
+        if (results.isEmpty) break;
+
         for (var item in results) {
           final double? lat = double.tryParse(item['緯度']?.toString() ?? '0');
           final double? lng = double.tryParse(item['經度']?.toString() ?? '0');
-          if (lat != null && lng != null) {
-            if (lat < 22 || lat > 26 || lng < 120 || lng > 122) continue;
+          if (lat != null && lng != null && lat > 22 && lat < 26) {
             final String lineName = (item['路線名稱'] ?? '').toString();
             final String carNo = (item['車號'] ?? '未知').toString();
-            trucks.add(GarbageTruck(
+            allTrucks.add(GarbageTruck(
               carNumber: carNo, lineId: carNo != '未知' ? '$lineName ($carNo)' : lineName,
               location: (item['位置描述'] ?? '').toString(), position: LatLng(lat, lng), updateTime: DateTime.now(), isRealTime: true,
             ));
           }
         }
-        return trucks;
+        if (results.length < 500) break;
       }
+      if (allTrucks.isNotEmpty) return allTrucks;
     } catch (_) {}
+    // 若即時失敗，退回資料庫推估
     return await findTrucksByTime(DateTime.now().hour, DateTime.now().minute);
   }
 
