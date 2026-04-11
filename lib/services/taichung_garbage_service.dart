@@ -47,14 +47,48 @@ class TaichungGarbageService extends BaseGarbageService {
     onProgress?.call('正在同步台中市最新班表資料...');
     bool apiSuccess = false;
     try {
-      // 1. 下載班表 JSON ( rid=68d1... )
+      // 1. 同步下載即時座標 (為了補全班表缺少的座標)
+      onProgress?.call('正在獲取座標參考資料...');
+      String dynamicUrl = '$dynamicApiUrl&limit=20000';
+      if (kIsWeb) dynamicUrl = 'https://api.allorigins.win/get?url=' + Uri.encodeComponent(dynamicUrl);
+      
+      Map<String, LatLng> carPositionMap = {};
+      final dynRes = await _client.get(Uri.parse(dynamicUrl)).timeout(const Duration(seconds: 15));
+      if (dynRes.statusCode == 200) {
+        String dynBody = dynRes.body;
+        if (kIsWeb) {
+          dynBody = json.decode(dynRes.body)['contents'] ?? '';
+        }
+        if (dynBody.isNotEmpty) {
+          final List<dynamic> dynData = json.decode(dynBody);
+          for (var d in dynData) {
+            final String c = (d['car'] ?? '').toString();
+            final double? x = double.tryParse(d['X']?.toString() ?? '');
+            final double? y = double.tryParse(d['Y']?.toString() ?? '');
+            if (c.isNotEmpty && x != null && y != null) {
+              carPositionMap[c] = LatLng(y, x);
+            }
+          }
+        }
+      }
+
+      // 2. 下載班表 JSON ( rid=68d1... )
+      onProgress?.call('正在下載詳細班表...');
       String targetUrl = routeApiUrl;
-      if (kIsWeb) targetUrl = 'https://api.allorigins.win/raw?url=' + Uri.encodeComponent(targetUrl);
+      if (kIsWeb) targetUrl = 'https://api.allorigins.win/get?url=' + Uri.encodeComponent(targetUrl);
       
       final response = await _client.get(Uri.parse(targetUrl)).timeout(const Duration(seconds: 15));
       if (response.statusCode == 200) {
-        final String body = utf8.decode(response.bodyBytes);
-        final List<GarbageRoutePoint> allPoints = await compute(_parseTaichungScheduleIsolate, body);
+        String body = response.body;
+        if (kIsWeb) {
+          body = json.decode(response.body)['contents'] ?? '';
+        }
+        
+        // 傳入座標參考 Map 進行解析
+        final List<GarbageRoutePoint> allPoints = await compute(
+          (String b) => _parseTaichungScheduleIsolate(b, carPositionMap), 
+          body
+        );
         
         if (allPoints.isNotEmpty) {
           onProgress?.call('正在更新資料庫 (${allPoints.length} 筆)...');
@@ -74,7 +108,6 @@ class TaichungGarbageService extends BaseGarbageService {
       await _dbService.updateVersion(requiredAssetVersion, 'taichung');
       onProgress?.call('台中市班表更新成功！');
     } else {
-      // 若 API 失敗，嘗試從本地 Assets 載入
       if (currentCount < 100) {
         onProgress?.call('雲端同步失敗，改從備援資料恢復...');
         await _importFromLocalAssets(onProgress);
@@ -85,7 +118,7 @@ class TaichungGarbageService extends BaseGarbageService {
   }
 
   /// 在背景 Isolate 解析台中班表 JSON。
-  static List<GarbageRoutePoint> _parseTaichungScheduleIsolate(String body) {
+  static List<GarbageRoutePoint> _parseTaichungScheduleIsolate(String body, [Map<String, LatLng>? coordMap]) {
     final List<dynamic> data = json.decode(body);
     List<GarbageRoutePoint> points = [];
     final int weekday = DateTime.now().weekday; // 1-7 (週一到週日)
@@ -95,7 +128,6 @@ class TaichungGarbageService extends BaseGarbageService {
       final String carNo = (item['car_licence'] ?? '').toString();
       if (carNo.isEmpty) continue;
 
-      // [智慧選時邏輯]：先找當天，若沒收則找這週最早有收的時間
       String rawTime = (item['g_d${weekday}_time_s'] ?? '').toString();
       if (rawTime.isEmpty || rawTime == 'null') {
         for (int d = 1; d <= 7; d++) {
@@ -109,9 +141,17 @@ class TaichungGarbageService extends BaseGarbageService {
 
       if (rawTime.isEmpty || rawTime == 'null') continue;
 
-      // 座標處理：X 為經度，Y 為緯度
-      final double? lat = double.tryParse(item['Y']?.toString() ?? '');
-      final double? lng = double.tryParse(item['X']?.toString() ?? '');
+      // 優先使用班表自帶座標 (雖然目前 rid=68d1 沒有)，若無則嘗試從參考 Map 補全
+      double? lat = double.tryParse(item['Y']?.toString() ?? '');
+      double? lng = double.tryParse(item['X']?.toString() ?? '');
+
+      if (lat == null || lng == null) {
+        final refPos = coordMap?[carNo];
+        if (refPos != null) {
+          lat = refPos.latitude;
+          lng = refPos.longitude;
+        }
+      }
 
       if (lat != null && lng != null) {
         final String area = item['area']?.toString() ?? '';
@@ -119,7 +159,7 @@ class TaichungGarbageService extends BaseGarbageService {
         final String siteName = item['caption']?.toString() ?? '定時收運點';
 
         points.add(GarbageRoutePoint(
-          lineId: carNo, // 以車牌為識別 Key
+          lineId: carNo, 
           lineName: '$area$village',
           rank: i,
           name: siteName,
