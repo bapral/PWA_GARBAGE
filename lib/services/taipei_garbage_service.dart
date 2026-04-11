@@ -1,6 +1,6 @@
 /// [整體程式說明]
 /// 本文件定義了台北市（Taipei）的垃圾清運服務實作。
-/// 支援手動強制更新（透過分頁 API 獲取完整 4000+ 筆資料）與啟動自動載入（Assets）。
+/// 支援手動強制更新（分頁抓取）與自動智能補全（Assets）。
 
 import 'dart:convert';
 import 'dart:async';
@@ -59,77 +59,55 @@ class TaipeiGarbageService extends BaseGarbageService {
 
   @override
   Future<void> syncDataIfNeeded({bool force = false, void Function(String)? onProgress}) async {
-    final bool hasData = await _dbService.hasData('taipei');
+    final int currentCount = await _dbService.getTotalCount('taipei');
 
     if (!force) {
-      if (!hasData) {
-        onProgress?.call('初次啟動，正在載入台北市預設點位...');
+      // [智能載入]：如果沒資料，或資料筆數低於預期（舊版的 1000 筆），則自動從 Assets 載入
+      if (currentCount < 2000) {
+        onProgress?.call('偵測到舊版快取，正在升級台北市預設點位...');
         await _importFromLocalJson(onProgress);
       }
       return;
     }
 
     onProgress?.call('正在連線台北市政府 API 執行完整同步...');
-    
-    // [優化]：台北市 API 限制單次 1000 筆，我們必須執行分頁抓取
     List<GarbageRoutePoint> allPoints = [];
     bool apiSuccess = false;
     const int pageSize = 1000;
-    
     try {
       for (int offset = 0; offset <= 6000; offset += pageSize) {
         onProgress?.call('正在獲取分頁數據: $offset ~ ${offset + pageSize}...');
         String targetUrl = '$routeUrl&limit=$pageSize&offset=$offset';
         if (kIsWeb) targetUrl = 'https://api.allorigins.win/raw?url=' + Uri.encodeComponent(targetUrl);
-        
         final response = await _client.get(Uri.parse(targetUrl)).timeout(const Duration(seconds: 15));
         if (response.statusCode != 200) break;
-        
         final List<GarbageRoutePoint> pagePoints = await compute(_parseTaipeiJsonIsolate, _TaipeiParseInput(response.body));
         if (pagePoints.isEmpty) break;
-        
         allPoints.addAll(pagePoints);
         onProgress?.call('已累積獲取: ${allPoints.length} 筆點位');
-        
-        // 如果該頁不滿 1000 筆，代表拿完了
         if (pagePoints.length < 500) break; 
       }
-
       if (allPoints.isNotEmpty) {
-        onProgress?.call('正在存入資料庫 (${allPoints.length} 筆)...');
-        await _dbService.clearAndSaveRoutePointsWithProgress(allPoints, 'taipei', (saved, total) {
-          onProgress?.call('資料庫更新中: $saved / $total 筆');
-        });
+        onProgress?.call('正在更新資料庫 (${allPoints.length} 筆)...');
+        await _dbService.clearAndSaveRoutePointsWithProgress(allPoints, 'taipei', (saved, total) => onProgress?.call('寫入中: $saved / $total 筆'));
         apiSuccess = true;
       }
     } catch (e) {
-      DatabaseService.log('台北市分頁同步失敗', error: e);
+      DatabaseService.log('Taipei Paged Sync Error', error: e);
     }
 
     if (!apiSuccess) {
-      onProgress?.call('雲端連線失敗，正在載入備援資料...');
+      onProgress?.call('雲端連線失敗，改從內建資料恢復...');
       await _importFromLocalJson(onProgress);
     }
-  }
-
-  Future<String> _downloadWithProgress(void Function(String)? onProgress, String url, int timeout) async {
-    final request = http.Request('GET', Uri.parse(url));
-    final streamedResponse = await _client.send(request).timeout(Duration(seconds: timeout));
-    if (streamedResponse.statusCode != 200) throw Exception('HTTP Error');
-    int receivedBytes = 0; final List<int> bytes = [];
-    await for (var chunk in streamedResponse.stream.timeout(Duration(seconds: timeout))) {
-      bytes.addAll(chunk); receivedBytes += chunk.length;
-      onProgress?.call('下載中: ${(receivedBytes / 1024).toStringAsFixed(1)} KB');
-    }
-    return utf8.decode(bytes);
   }
 
   Future<bool> _importFromLocalJson(void Function(String)? onProgress) async {
     try {
       final String content = await rootBundle.loadString('assets/taipei_route.json');
-      final List<GarbageRoutePoint> points = _parseTaipeiJsonIsolate(_TaipeiParseInput(content));
+      final List<GarbageRoutePoint> points = await compute(_parseTaipeiJsonIsolate, _TaipeiParseInput(content));
       if (points.isNotEmpty) {
-        await _dbService.clearAndSaveRoutePointsWithProgress(points, 'taipei', (saved, total) => onProgress?.call('載入預設點位: $saved / $total 筆'));
+        await _dbService.clearAndSaveRoutePointsWithProgress(points, 'taipei', (saved, total) => onProgress?.call('載入內建資料: $saved / $total 筆'));
         return true;
       }
     } catch (_) {}
