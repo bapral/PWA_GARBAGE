@@ -1,54 +1,32 @@
 /// [整體程式說明]
-/// 本文件定義了 [TainanGarbageService] 類別，專門處理台南市的垃圾清運資料。
-/// 支援從台南市政府開放資料平台介接 JSON 格式的 API。
-/// 包含即時動態位置以及詳細的清運站點班表資料。
-///
-/// [執行順序說明]
-/// 1. 呼叫 `syncDataIfNeeded`：連線至台南市班表 API 下載所有清運點資料。
-/// 2. 解析 JSON 內容，將點位座標（LATITUDE/LONGITUDE）與路線資訊轉換為物件。
-/// 3. 使用事務模式批量寫入 SQLite 資料庫。
-/// 4. 呼叫 `fetchTrucks`：定期從 API 獲取最新的垃圾車即時座標。
-/// 5. 提供 `findTrucksByTime` 功能，於網路斷線或預測模式下從資料庫檢檢索班表。
+/// 本文件定義了台南市（Tainan）的垃圾清運服務實作。
+/// 支援串流下載以即時顯示下載進度與筆數回報。
 
 import 'package:latlong2/latlong.dart';
 import 'package:http/http.dart' as http;
 import 'dart:convert';
+import 'dart:async';
 import '../models/garbage_truck.dart';
 import '../models/garbage_route_point.dart';
 import 'database_service.dart';
 import 'ntpc_garbage_service.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 import 'package:flutter/foundation.dart';
+import 'package:flutter/services.dart' show rootBundle;
 
-/// [TainanGarbageService] 實作台南市的垃圾車服務邏輯。
-/// 
-/// 支援從台南市政府 Open Data 取得 JSON 格式的即時動態與靜態清運點資料。
 class TainanGarbageService extends BaseGarbageService {
-  /// 即時動態 API
   static const String dynamicApiUrl = 'https://soa.tainan.gov.tw/Api/Service/Get/2c8a70d5-06f2-4353-9e92-c40d33bcd969';
-  /// 班表清運點 API
   static const String routeApiUrl = 'https://soa.tainan.gov.tw/Api/Service/Get/84df8cd6-8741-41ed-919c-5105a28ecd6d';
 
   final DatabaseService _dbService = DatabaseService();
   final http.Client _client;
 
-  /// 建構子：初始化台南市服務。
-  /// [localSourceDir] 資源目錄，[client] 可選傳入 http 客戶端。
   TainanGarbageService({required super.localSourceDir, http.Client? client}) 
-      : _client = client ?? http.Client() {
-    DatabaseService.log('TainanGarbageService 已建立');
-  }
+      : _client = client ?? http.Client();
 
   @override
-  void dispose() {
-    _client.close();
-    DatabaseService.log('TainanGarbageService 已釋放資源 (Client closed)');
-  }
+  void dispose() => _client.close();
 
-  /// 台南市路線點位同步程序。
-  /// 
-  /// 解析 JSON 中的座標、清運站點名稱與表定時間。
-  /// [onProgress] 同步進度回調。
   @override
   Future<void> syncDataIfNeeded({void Function(String)? onProgress}) async {
     String currentAppVersion = '1.0.0+1';
@@ -57,71 +35,123 @@ class TainanGarbageService extends BaseGarbageService {
         final PackageInfo packageInfo = await PackageInfo.fromPlatform();
         currentAppVersion = '${packageInfo.version}+${packageInfo.buildNumber}';
       }
-    } catch (e) {
-      DatabaseService.log('PackageInfo error: $e');
-    }
+    } catch (_) {}
     
     final String? storedVersion = await _dbService.getStoredVersion('tainan');
-
-    bool needsUpdate = storedVersion != currentAppVersion || !(await _dbService.hasData('tainan'));
-
-    if (!needsUpdate) {
-      onProgress?.call('台南市資料庫已是最新版...');
+    if (storedVersion == currentAppVersion && (await _dbService.hasData('tainan'))) {
+      onProgress?.call('台南市資料已就緒...');
       return;
     }
 
-    onProgress?.call('正在啟動台南市 API 同步...');
+    onProgress?.call('正在初始化台南市資料更新...');
     
+    bool apiSuccess = false;
+    const int timeoutSeconds = 15;
     try {
       String targetUrl = routeApiUrl;
       if (kIsWeb) {
         targetUrl = 'https://api.allorigins.win/raw?url=' + Uri.encodeComponent(targetUrl);
       }
       
-      final response = await _client.get(Uri.parse(targetUrl)).timeout(const Duration(seconds: 30));
+      onProgress?.call('正在從雲端獲取班表...');
+      final String content = await _downloadWithProgress(onProgress, targetUrl, timeoutSeconds);
       
-      if (response.statusCode == 200) {
-        final Map<String, dynamic> data = json.decode(utf8.decode(response.bodyBytes));
-        final List<dynamic> records = data['data'] ?? [];
-        
-        onProgress?.call('成功獲取 ${records.length} 筆清運點，正在解析格式...');
-        
+      onProgress?.call('解析數據結構中...');
+      final Map<String, dynamic> data = json.decode(content);
+      final List<dynamic> records = data['data'] ?? [];
+      
+      if (records.isNotEmpty) {
         List<GarbageRoutePoint> allPoints = [];
         for (int i = 0; i < records.length; i++) {
           final item = records[i];
-          
           final double? lat = double.tryParse(item['LATITUDE']?.toString() ?? '');
           final double? lng = double.tryParse(item['LONGITUDE']?.toString() ?? '');
-          final String routeId = item['ROUTEID']?.toString() ?? '未知路線';
-          final String area = item['AREA']?.toString() ?? '';
-          String arrivalTime = item['TIME']?.toString() ?? '';
-
-          if (lat != null && lng != null && arrivalTime.isNotEmpty) {
+          if (lat != null && lng != null) {
             allPoints.add(GarbageRoutePoint(
-              lineId: routeId,
-              lineName: '$area $routeId 路線',
+              lineId: item['ROUTEID']?.toString() ?? '',
+              lineName: '${item['AREA'] ?? ''} ${item['ROUTEID'] ?? ''}',
               rank: int.tryParse(item['ROUTEORDER']?.toString() ?? '') ?? i,
               name: item['POINTNAME']?.toString() ?? '未知站點',
               position: LatLng(lat, lng),
-              arrivalTime: arrivalTime,
+              arrivalTime: item['TIME']?.toString() ?? '',
             ));
           }
         }
         
-        onProgress?.call('正在批次存入本地 SQLite 資料庫...');
-        await _dbService.clearAndSaveRoutePoints(allPoints, 'tainan');
-        await _dbService.updateVersion(currentAppVersion, 'tainan');
-        onProgress?.call('台南市同步作業順利完成。');
+        onProgress?.call('正在存入資料庫...');
+        await _dbService.clearAndSaveRoutePointsWithProgress(allPoints, 'tainan', (saved, total) {
+          onProgress?.call('資料庫寫入中: $saved / $total 筆');
+        });
+        apiSuccess = true;
       }
     } catch (e) {
-      DatabaseService.log('台南市 API 同步時發生錯誤', error: e);
-      onProgress?.call('同步失敗: $e');
+      if (e is TimeoutException) {
+        onProgress?.call('下載超過 $timeoutSeconds 秒已 Timeout，改用原內建資料...');
+      } else {
+        onProgress?.call('雲端連線失敗，正在載入內建資產...');
+      }
+      DatabaseService.log('Tainan Sync Error', error: e);
+    }
+
+    if (apiSuccess) {
+      await _dbService.updateVersion(currentAppVersion, 'tainan');
+      onProgress?.call('台南市同步完成！');
+    } else {
+      if (await _importFromLocalJson(onProgress)) {
+        await _dbService.updateVersion(currentAppVersion, 'tainan');
+        onProgress?.call('台南市內建資料載入完成。');
+      }
     }
   }
 
-  /// 獲取台南市車輛即時動態。
-  /// 
-  /// 透過 API 獲取車牌、路線與即時座標，並回傳 [GarbageTruck] 清單。
+  Future<String> _downloadWithProgress(void Function(String)? onProgress, String url, int timeout) async {
+    final request = http.Request('GET', Uri.parse(url));
+    final streamedResponse = await _client.send(request).timeout(Duration(seconds: timeout));
+    if (streamedResponse.statusCode != 200) throw Exception('API Error');
+
+    final int totalBytes = streamedResponse.contentLength ?? 0;
+    int receivedBytes = 0;
+    final List<int> bytes = [];
+
+    await for (var chunk in streamedResponse.stream.timeout(Duration(seconds: timeout))) {
+      bytes.addAll(chunk);
+      receivedBytes += chunk.length;
+      if (totalBytes > 0) {
+        onProgress?.call('下載中: ${(receivedBytes / 1024).toStringAsFixed(1)} KB / ${(totalBytes / 1024).toStringAsFixed(1)} KB');
+      } else {
+        onProgress?.call('下載中: ${(receivedBytes / 1024).toStringAsFixed(1)} KB');
+      }
+    }
+    return utf8.decode(bytes);
+  }
+
+  Future<bool> _importFromLocalJson(void Function(String)? onProgress) async {
+    try {
+      final String content = await rootBundle.loadString('assets/tainan_route.json');
+      final Map<String, dynamic> data = json.decode(content);
+      final List<dynamic> records = data['data'] ?? [];
+      
+      List<GarbageRoutePoint> allPoints = [];
+      for (int i = 0; i < records.length; i++) {
+        final item = records[i];
+        allPoints.add(GarbageRoutePoint(
+          lineId: item['ROUTEID']?.toString() ?? '',
+          lineName: '${item['AREA'] ?? ''} ${item['ROUTEID'] ?? ''}',
+          rank: i,
+          name: item['POINTNAME']?.toString() ?? '未知站點',
+          position: LatLng(double.tryParse(item['LATITUDE']?.toString() ?? '0') ?? 0, double.tryParse(item['LONGITUDE']?.toString() ?? '0') ?? 0),
+          arrivalTime: item['TIME']?.toString() ?? '',
+        ));
+      }
+      
+      await _dbService.clearAndSaveRoutePointsWithProgress(allPoints, 'tainan', (saved, total) {
+        onProgress?.call('載入內建資料: $saved / $total 筆');
+      });
+      return true;
+    } catch (_) {}
+    return false;
+  }
+
   @override
   Future<List<GarbageTruck>> fetchTrucks() async {
     try {
@@ -129,62 +159,30 @@ class TainanGarbageService extends BaseGarbageService {
       if (kIsWeb) {
         targetUrl = 'https://api.allorigins.win/raw?url=' + Uri.encodeComponent(targetUrl);
       }
-      
-      final response = await _client.get(Uri.parse(targetUrl));
-      
+      final response = await _client.get(Uri.parse(targetUrl)).timeout(const Duration(seconds: 10));
       if (response.statusCode == 200) {
         final Map<String, dynamic> data = json.decode(utf8.decode(response.bodyBytes));
         final List<dynamic> records = data['data'] ?? [];
-        final now = DateTime.now();
-        
-        return records.map((item) {
-          final String carNo = item['car']?.toString() ?? '未知車號';
-          final String linid = item['linid']?.toString() ?? carNo;
-          final double lat = double.tryParse(item['y']?.toString() ?? '0') ?? 0;
-          final double lng = double.tryParse(item['x']?.toString() ?? '0') ?? 0;
-          
-          return GarbageTruck(
-            carNumber: carNo,
-            lineId: linid,
-            location: item['location']?.toString() ?? '行駛中',
-            position: LatLng(lat, lng),
-            updateTime: now,
-          );
-        }).toList();
+        return records.map((item) => GarbageTruck(
+          carNumber: item['car']?.toString() ?? '未知',
+          lineId: item['linid']?.toString() ?? '',
+          location: item['location']?.toString() ?? '行駛中',
+          position: LatLng(double.tryParse(item['y']?.toString() ?? '0') ?? 0, double.tryParse(item['x']?.toString() ?? '0') ?? 0),
+          updateTime: DateTime.now(),
+        )).toList();
       }
-    } catch (e) {
-      DatabaseService.log('台南市即時 API 連線異常，改採班表查詢模式', error: e);
-    }
-    
-    // 若即時 API 失敗，退回班表預測
-    final now = DateTime.now();
-    return await findTrucksByTime(now.hour, now.minute);
+    } catch (_) {}
+    return await findTrucksByTime(DateTime.now().hour, DateTime.now().minute);
   }
 
-  /// 班表查詢。
-  /// [hour] 小時，[minute] 分鐘。
   @override
   Future<List<GarbageTruck>> findTrucksByTime(int hour, int minute) async {
     final points = await _dbService.findPointsByTime(hour, minute, 'tainan');
-    final now = DateTime.now();
-    
-    return points.map((p) {
-      DateTime scheduledTime = now;
-      try {
-        final parts = p.arrivalTime.split(':');
-        if (parts.length >= 2) {
-          scheduledTime = DateTime(now.year, now.month, now.day, int.parse(parts[0]), int.parse(parts[1]));
-        }
-      } catch (_) {}
-
-      return GarbageTruck(carNumber: '預定車', lineId: p.lineId, location: p.name, position: p.position, updateTime: scheduledTime);
-    }).toList();
+    return points.map((p) => GarbageTruck(
+      carNumber: '預定車', lineId: p.lineId, location: p.name, position: p.position, updateTime: DateTime.now(),
+    )).toList();
   }
 
-  /// 獲取指定路線的所有站點序列。
-  /// [lineId] 路線 ID。
   @override
-  Future<List<GarbageRoutePoint>> getRouteForLine(String lineId) async {
-    return await _dbService.getRoutePoints(lineId, 'tainan');
-  }
+  Future<List<GarbageRoutePoint>> getRouteForLine(String lineId) async => await _dbService.getRoutePoints(lineId, 'tainan');
 }
