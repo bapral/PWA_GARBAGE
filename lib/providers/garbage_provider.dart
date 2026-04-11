@@ -280,12 +280,13 @@ class GarbageTrucksNotifier extends Notifier<List<GarbageTruck>> {
       final service = ref.read(garbageServiceProvider);
       ref.read(isSyncingProvider.notifier).setSyncing(true);
       try {
-        // 必要時執行路線資料同步 (如初次啟動或版號更新)
-        await service.syncDataIfNeeded(onProgress: (msg) {
-          ref.read(syncProgressProvider.notifier).setProgress(msg);
-        });
+        // [修改]：正常啟動時 force 設為 false，僅在必要時從 Assets 載入
+        await service.syncDataIfNeeded(
+          force: false, 
+          onProgress: (msg) => ref.read(syncProgressProvider.notifier).setProgress(msg)
+        );
         await _updateCount(city);
-        await refresh(); // 初次載入
+        await refresh();
       } catch (e) {
         DatabaseService.log('背景同步失敗', error: e);
       } finally {
@@ -335,9 +336,10 @@ class GarbageTrucksNotifier extends Notifier<List<GarbageTruck>> {
       try {
         // 設定一個無效的版本號以觸發強制同步
         await DatabaseService().updateVersion('force_refresh_$city', city);
-        await service.syncDataIfNeeded(onProgress: (msg) {
-          ref.read(syncProgressProvider.notifier).setProgress(msg);
-        });
+        await service.syncDataIfNeeded(
+          force: true, // [關鍵]：手動點擊按鈕，強制連線 API
+          onProgress: (msg) => ref.read(syncProgressProvider.notifier).setProgress(msg)
+        );
         await _updateCount(city);
         ref.invalidate(predictedTrucksProvider); // 讓 UI 重算
       } finally {
