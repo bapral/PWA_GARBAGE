@@ -90,7 +90,7 @@ final currentCityConfigProvider = Provider<CityConfig>((ref) {
       appTitle: '台北市垃圾車即時地圖',
       initialCenter: const LatLng(25.0330, 121.5654),
       themeColor: Colors.blue,
-      localSourceDir: 'assets/taipei_route.csv',
+      localSourceDir: 'assets/taipei_route.json',
     );
   } else if (city == 'taichung') {
     return CityConfig(
