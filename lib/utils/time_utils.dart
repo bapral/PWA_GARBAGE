@@ -10,37 +10,58 @@ class TimeUtils {
   /// - "20240411T093000" -> "09:30"
   static String formatTo24Hour(String raw) {
     if (raw.isEmpty) return "";
-    
-    String time = raw.trim();
 
-    // 處理台中 ISO T 格式: 20240411T093000
-    if (time.contains('T')) {
+    String time = raw.trim().toUpperCase();
+
+    // 處理 12 小時制標記 (AM/PM 或 上午/下午)
+    bool isPM = time.contains('PM') || time.contains('下午') || time.contains('晚上');
+    bool isAM = time.contains('AM') || time.contains('上午') || time.contains('早上');
+
+    // 移除所有非數字字元，但保留冒號以便後續切割
+    time = time.replaceAll(RegExp(r'[^0-9:]'), '');
+
+    // 處理台中 ISO T 格式: 20240411T093000 -> 09:30
+    if (raw.contains('T')) {
       try {
-        time = time.split('T')[1].substring(0, 4); // 取 0930
+        final parts = raw.split('T');
+        if (parts.length > 1 && parts[1].length >= 4) {
+          time = parts[1].substring(0, 4); // 取 0930
+        }
       } catch (_) {}
     }
 
-    // 處理區間格式: 16:00-16:10
+    // 處理區間格式: 16:00-16:10 -> 16:00
     if (time.contains('-')) {
       time = time.split('-')[0].trim();
     }
 
-    // 移除現有的冒號以便統一處理
-    time = time.replaceAll(':', '');
+    // 解析小時與分鐘
+    int hour = 0;
+    int minute = 0;
 
-    // 處理只有 3 位數的情況 (例如 830 -> 0830)
-    if (time.length == 3) {
-      time = '0$time';
+    if (time.contains(':')) {
+      final parts = time.split(':');
+      hour = int.tryParse(parts[0]) ?? 0;
+      minute = parts.length > 1 ? (int.tryParse(parts[1]) ?? 0) : 0;
+    } else {
+      // 處理純數字 0830, 830, 2030
+      if (time.length == 3) {
+        hour = int.tryParse(time.substring(0, 1)) ?? 0;
+        minute = int.tryParse(time.substring(1, 3)) ?? 0;
+      } else if (time.length == 4) {
+        hour = int.tryParse(time.substring(0, 2)) ?? 0;
+        minute = int.tryParse(time.substring(2, 4)) ?? 0;
+      }
     }
 
-    // 處理 4 位數的情況 (例如 0830 或 2030)
-    if (time.length == 4) {
-      return '${time.substring(0, 2)}:${time.substring(2, 4)}';
-    }
+    // 根據 AM/PM 修正小時
+    if (isPM && hour < 12) hour += 12;
+    if (isAM && hour == 12) hour = 0;
 
-    // 若都不符合，回傳原始並嘗試補冒號 (保險)
-    if (raw.length == 5 && raw.contains(':')) return raw;
-    
-    return raw;
+    // 確保範圍合法
+    if (hour < 0) hour = 0; if (hour > 23) hour = 23;
+    if (minute < 0) minute = 0; if (minute > 59) minute = 59;
+
+    return '${hour.toString().padLeft(2, '0')}:${minute.toString().padLeft(2, '0')}';
   }
 }

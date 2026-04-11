@@ -19,6 +19,9 @@ class TaichungGarbageService extends BaseGarbageService {
   static const String routeApiUrl = 'https://newdatacenter.taichung.gov.tw/api/v1/no-auth/resource.download?rid=68d1a87f-7baa-4b50-8408-c36a3a7eda68';
   static const String dynamicApiUrl = 'https://newdatacenter.taichung.gov.tw/api/v1/no-auth/resource.download?rid=c923ad20-2ec6-43b9-b3ab-54527e99f7bc';
 
+  // [重要] 資產版本號，每次更新 assets/*.json 後增加此數字可強制所有使用者升級
+  static const String requiredAssetVersion = '20260411_v2'; 
+
   final DatabaseService _dbService = DatabaseService();
   final http.Client _client;
 
@@ -29,16 +32,19 @@ class TaichungGarbageService extends BaseGarbageService {
 
   @override
   Future<void> syncDataIfNeeded({bool force = false, void Function(String)? onProgress}) async {
+    final String? storedVersion = await _dbService.getStoredVersion('taichung');
     final int currentCount = await _dbService.getTotalCount('taichung');
 
     if (!force) {
-      // [智能補全]：筆數低於 15,000 時自動從 Assets 升級
-      if (currentCount < 15000) {
+      // [智能補全]：版本不符或筆數不足 15,000 時自動從 Assets 升級
+      if (storedVersion != requiredAssetVersion || currentCount < 15000) {
         onProgress?.call('偵測到資料版本過舊，正在升級台中市預設點位...');
         await _importFromLocalAssets(onProgress);
+        await _dbService.updateVersion(requiredAssetVersion, 'taichung');
       }
       return;
     }
+    // ... (rest of methods unchanged)
 
     onProgress?.call('正在更新台中市資料...');
     try {
