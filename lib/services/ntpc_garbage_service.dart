@@ -131,7 +131,7 @@ class NtpcGarbageService extends BaseGarbageService {
           final h = rows[0].map((e) => e.toString().toLowerCase().trim()).toList();
           List<GarbageTruck> trucks = [];
           for (int i = 1; i < rows.length; i++) {
-            final r = rows[i]; if (row.length < 5) continue;
+            final r = rows[i]; if (r.length < 5) continue;
             final double lat = double.tryParse(r[h.indexOf('latitude')].toString()) ?? 0;
             final double lng = double.tryParse(r[h.indexOf('longitude')].toString()) ?? 0;
             if (lat < 22 || lat > 26 || lng < 120 || lng > 122) continue;

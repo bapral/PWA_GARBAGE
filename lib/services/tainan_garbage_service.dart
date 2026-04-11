@@ -29,18 +29,14 @@ class TainanGarbageService extends BaseGarbageService {
   void dispose() => _client.close();
 
   @override
-  Future<void> syncDataIfNeeded({void Function(String)? onProgress}) async {
-    String currentAppVersion = '1.0.0+1';
-    try {
-      if (!kIsWeb) {
-        final PackageInfo packageInfo = await PackageInfo.fromPlatform();
-        currentAppVersion = '${packageInfo.version}+${packageInfo.buildNumber}';
+  Future<void> syncDataIfNeeded({bool force = false, void Function(String)? onProgress}) async {
+    final bool hasData = await _dbService.hasData('tainan');
+
+    if (!force) {
+      if (!hasData) {
+        onProgress?.call('初次啟動，正在快速載入台南市預設班表...');
+        await _importFromLocalJson(onProgress);
       }
-    } catch (_) {}
-    
-    final String? storedVersion = await _dbService.getStoredVersion('tainan');
-    if (storedVersion == currentAppVersion && (await _dbService.hasData('tainan'))) {
-      onProgress?.call('台南市資料已就緒...');
       return;
     }
 
