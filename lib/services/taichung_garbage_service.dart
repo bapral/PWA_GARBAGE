@@ -1,6 +1,6 @@
 /// [整體程式說明]
 /// 本文件定義了台中市（Taichung）的垃圾清運服務實作。
-/// 支援串流下載以顯示下載進度，並提供明確的資料庫儲存筆數回報。
+/// 遵循 GARBAGE_DATA_GUIDE.md 實作 ISO T 時間格式化、車牌映射與座標範圍驗證。
 
 import 'package:latlong2/latlong.dart';
 import 'package:http/http.dart' as http;
@@ -61,22 +61,20 @@ class TaichungGarbageService extends BaseGarbageService {
           final double? lng = double.tryParse(item['X']?.toString() ?? '');
           final double? lat = double.tryParse(item['Y']?.toString() ?? '');
           if (carNo.isNotEmpty && lat != null && lng != null) {
-            carPositions[carNo] = LatLng(lat, lng);
+            // 座標範圍驗證
+            if (lat >= 22 && lat <= 26 && lng >= 120 && lng <= 122) {
+              carPositions[carNo] = LatLng(lat, lng);
+            }
           }
         }
       }
 
       onProgress?.call('正在從雲端下載班表...');
       String content;
-      const int timeoutSeconds = 20;
       try {
-        content = await _downloadWithProgress(onProgress, routeApiUrl, timeoutSeconds);
+        content = await _downloadWithProgress(onProgress, routeApiUrl, 20);
       } catch (e) {
-        if (e is TimeoutException) {
-          onProgress?.call('下載超過 $timeoutSeconds 秒已 Timeout，改用原內建資料...');
-        } else {
-          onProgress?.call('雲端下載失敗，切換至內建資產...');
-        }
+        onProgress?.call('雲端下載失敗，切換至內建資產...');
         content = await rootBundle.loadString('assets/taichung_route.json');
       }
 
@@ -88,15 +86,28 @@ class TaichungGarbageService extends BaseGarbageService {
       
       for (int i = 0; i < scheduleData.length; i++) {
         final item = scheduleData[i];
+        // [指南要求]：台中市以「車牌號碼」為核心映射
         final String carNo = item['car_licence']?.toString() ?? '';
-        String arrivalTime = item['g_d${dayOfWeek}_time_s']?.toString() ?? '';
-        if (arrivalTime.isEmpty) {
+        String rawTime = item['g_d${dayOfWeek}_time_s']?.toString() ?? '';
+        
+        if (rawTime.isEmpty) {
           for (int d = 1; d <= 7; d++) {
-            arrivalTime = item['g_d${d}_time_s']?.toString() ?? '';
-            if (arrivalTime.isNotEmpty) break;
+            rawTime = item['g_d${d}_time_s']?.toString() ?? '';
+            if (rawTime.isNotEmpty) break;
           }
         }
-        if (arrivalTime.isEmpty) continue;
+        if (rawTime.isEmpty) continue;
+
+        // [指南要求]：處理 ISO T 格式 (20240411T093000 -> 09:30)
+        String arrivalTime = rawTime;
+        if (rawTime.contains('T')) {
+          try {
+            final tPart = rawTime.split('T')[1]; // 093000
+            arrivalTime = '${tPart.substring(0, 2)}:${tPart.substring(2, 4)}';
+          } catch (_) {}
+        } else if (rawTime.length == 4 && !rawTime.contains(':')) {
+          arrivalTime = '${rawTime.substring(0, 2)}:${rawTime.substring(2, 4)}';
+        }
 
         LatLng pos = carPositions[carNo] ?? const LatLng(24.147, 120.673);
         allPoints.add(GarbageRoutePoint(
@@ -127,24 +138,16 @@ class TaichungGarbageService extends BaseGarbageService {
     if (kIsWeb) {
       targetUrl = 'https://api.allorigins.win/raw?url=' + Uri.encodeComponent(url);
     }
-    
     final request = http.Request('GET', Uri.parse(targetUrl));
     final streamedResponse = await _client.send(request).timeout(Duration(seconds: timeout));
-    
     if (streamedResponse.statusCode != 200) throw Exception('API Error');
 
-    final int totalBytes = streamedResponse.contentLength ?? 0;
     int receivedBytes = 0;
     final List<int> bytes = [];
-
     await for (var chunk in streamedResponse.stream.timeout(Duration(seconds: timeout))) {
       bytes.addAll(chunk);
       receivedBytes += chunk.length;
-      if (totalBytes > 0) {
-        onProgress?.call('下載中: ${(receivedBytes / 1024).toStringAsFixed(1)} KB / ${(totalBytes / 1024).toStringAsFixed(1)} KB');
-      } else {
-        onProgress?.call('下載中: ${(receivedBytes / 1024).toStringAsFixed(1)} KB');
-      }
+      onProgress?.call('下載中: ${(receivedBytes / 1024).toStringAsFixed(1)} KB');
     }
     return utf8.decode(bytes);
   }
@@ -153,41 +156,54 @@ class TaichungGarbageService extends BaseGarbageService {
   Future<List<GarbageTruck>> fetchTrucks() async {
     try {
       final String timestamp = DateTime.now().millisecondsSinceEpoch.toString();
-      String requestUrl = '$dynamicApiUrl&limit=20000&_t=$timestamp';
+      String targetUrl = '$dynamicApiUrl&limit=20000&_t=$timestamp';
       if (kIsWeb) {
-        requestUrl = 'https://api.allorigins.win/raw?url=' + Uri.encodeComponent(requestUrl);
+        targetUrl = 'https://api.allorigins.win/raw?url=' + Uri.encodeComponent(targetUrl);
       }
-      final response = await _client.get(Uri.parse(requestUrl)).timeout(const Duration(seconds: 8));
+      final response = await _client.get(Uri.parse(targetUrl)).timeout(const Duration(seconds: 10));
       if (response.statusCode == 200) {
         final List<dynamic> results = json.decode(response.body);
         return results.map((item) {
           final String carNo = item['car']?.toString() ?? '未知車號';
-          final String latStr = item['Y']?.toString() ?? '0';
-          final String lonStr = item['X']?.toString() ?? '0';
-          return GarbageTruck(
-            carNumber: carNo, lineId: item['lineid']?.toString() ?? '', location: location,
-            position: LatLng(double.tryParse(latStr) ?? 0, double.tryParse(lonStr) ?? 0),
-            updateTime: DateTime.now(),
-            isRealTime: true,
-          );
-          }).toList();
-          }
-          } catch (_) {}
-          return await findTrucksByTime(DateTime.now().hour, DateTime.now().minute);
+          final double lat = double.tryParse(item['Y']?.toString() ?? '0') ?? 0;
+          final double lng = double.tryParse(item['X']?.toString() ?? '0') ?? 0;
+          
+          // [指南要求]：ISO T 時間處理
+          DateTime updateTime = DateTime.now();
+          final String? timeStr = item['time']?.toString();
+          if (timeStr != null && timeStr.contains('T')) {
+            try {
+              final String formatted = '${timeStr.substring(0, 4)}-${timeStr.substring(4, 6)}-${timeStr.substring(6, 8)} ${timeStr.substring(9, 11)}:${timeStr.substring(11, 13)}:${timeStr.substring(13, 15)}';
+              updateTime = DateTime.tryParse(formatted) ?? DateTime.now();
+            } catch (_) {}
           }
 
-          @override
-          Future<List<GarbageTruck>> findTrucksByTime(int hour, int minute) async {
-          final points = await _dbService.findPointsByTime(hour, minute, 'taichung');
-          return points.map((p) => GarbageTruck(
-          carNumber: '預定車', 
-          lineId: p.lineId, 
-          location: '${p.lineName} - ${p.name}', 
-          position: p.position, 
-          updateTime: DateTime.now(),
-          isRealTime: false,
-          )).toList();
-          }
+          return GarbageTruck(
+            carNumber: carNo,
+            lineId: carNo, // 台中以車號為 ID
+            location: item['location']?.toString() ?? '移動中',
+            position: LatLng(lat, lng),
+            updateTime: updateTime,
+            isRealTime: true,
+          );
+        }).where((t) => t.position.latitude >= 22 && t.position.latitude <= 26).toList();
+      }
+    } catch (_) {}
+    return await findTrucksByTime(DateTime.now().hour, DateTime.now().minute);
+  }
+
+  @override
+  Future<List<GarbageTruck>> findTrucksByTime(int hour, int minute) async {
+    final points = await _dbService.findPointsByTime(hour, minute, 'taichung');
+    return points.map((p) => GarbageTruck(
+      carNumber: '預定車', 
+      lineId: p.lineId, 
+      location: '${p.lineName} - ${p.name}', 
+      position: p.position, 
+      updateTime: DateTime.now(),
+      isRealTime: false,
+    )).toList();
+  }
 
   @override
   Future<List<GarbageRoutePoint>> getRouteForLine(String lineId) async => await _dbService.getRoutePoints(lineId, 'taichung');

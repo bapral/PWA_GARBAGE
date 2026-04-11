@@ -1,6 +1,6 @@
 /// [整體程式說明]
 /// 本文件定義了新北市（NTPC）的垃圾清運服務實作。
-/// 支援串流下載（Streamed Download）以即時顯示下載進度與筆數。
+/// 遵循 GARBAGE_DATA_GUIDE.md 實作安全性驗證、效能解析與髒資料過濾。
 
 import 'dart:convert';
 import 'dart:async';
@@ -16,10 +16,57 @@ import 'package:flutter/foundation.dart';
 
 import 'ntpc_garbage_service.dart';
 
+/// 在獨立 Isolate 中執行的 CSV 解析函式。
+List<GarbageRoutePoint> _parseCsvIsolate(_CsvParseInput input) {
+  final List<List<dynamic>> fields = const CsvToListConverter(
+    shouldParseNumbers: false, 
+    eol: '\n'
+  ).convert(input.csvBody);
+
+  if (fields.length <= 1) return [];
+
+  final header = fields[0].map((e) => e.toString().toLowerCase().trim()).toList();
+  int idxLineId = header.indexOf('lineid');
+  int idxLat = header.indexOf('latitude');
+  int idxLng = header.indexOf('longitude');
+  int idxTime = header.indexOf('time');
+  int idxLineName = header.indexOf('linename');
+  int idxName = header.indexOf('name');
+  int idxRank = header.indexOf('rank');
+
+  List<GarbageRoutePoint> result = [];
+  for (int i = 1; i < fields.length; i++) {
+    final row = fields[i];
+    if (row.length < 4) continue;
+
+    final double lat = double.tryParse(row[idxLat].toString()) ?? 0;
+    final double lng = double.tryParse(row[idxLng].toString()) ?? 0;
+
+    // [指南要求]：過濾座標異常的髒資料 (範圍: 緯度 22-26, 經度 120-122)
+    if (lat < 22 || lat > 26 || lng < 120 || lng > 122) continue;
+
+    result.add(GarbageRoutePoint(
+      lineId: row[idxLineId].toString(),
+      lineName: idxLineName != -1 ? row[idxLineName].toString() : '',
+      rank: idxRank != -1 ? (int.tryParse(row[idxRank].toString()) ?? 0) : i,
+      name: idxName != -1 ? row[idxName].toString() : '',
+      position: LatLng(lat, lng),
+      arrivalTime: row[idxTime].toString(),
+    ));
+  }
+  return result;
+}
+
+class _CsvParseInput {
+  final String csvBody;
+  const _CsvParseInput(this.csvBody);
+}
+
 class NtpcGarbageService extends BaseGarbageService {
   static const String apiUrl = 'https://data.ntpc.gov.tw/api/datasets/28ab4122-60e1-4065-98e5-abccb69aaca6/csv';
   static const String routeUrl = 'https://data.ntpc.gov.tw/api/datasets/edc3ad26-8ae7-4916-a00b-bc6048d19bf8/csv';
 
+  // [指南要求]：必須包含特定 User-Agent 與 Referer 繞過 403 限制
   static const Map<String, String> _headers = {
     'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
     'Accept': 'text/csv, application/json',
@@ -67,20 +114,15 @@ class NtpcGarbageService extends BaseGarbageService {
       } else {
         onProgress?.call('連線異常，正在切換至備援資產...');
       }
-      DatabaseService.log('新北市 API 失敗: $e');
     }
 
     if (apiSuccess) {
       await _dbService.updateVersion(currentAppVersion, 'ntpc');
       onProgress?.call('新北市雲端同步成功！');
     } else {
-      if (!apiSuccess) {
-        // 若 apiSuccess 為 false 但沒進入 catch (例如 statusCode 錯誤)
-        onProgress?.call('雲端連線失敗，正在載入內建資產...');
-      }
       if (await _importFromLocalCSV(onProgress)) {
         await _dbService.updateVersion(currentAppVersion, 'ntpc');
-        onProgress?.call('新北市內建資料載入完成。');
+        onProgress?.call('新北市內建資料載入成功。');
       }
     }
   }
@@ -91,7 +133,6 @@ class NtpcGarbageService extends BaseGarbageService {
     _headers.forEach((k, v) => request.headers[k] = v);
     
     final streamedResponse = await _client.send(request).timeout(Duration(seconds: timeout));
-    
     if (streamedResponse.statusCode != 200) return false;
 
     final int totalBytes = streamedResponse.contentLength ?? 0;
@@ -101,19 +142,15 @@ class NtpcGarbageService extends BaseGarbageService {
     await for (var chunk in streamedResponse.stream.timeout(Duration(seconds: timeout))) {
       bytes.addAll(chunk);
       receivedBytes += chunk.length;
-      if (totalBytes > 0) {
-        onProgress?.call('下載中: ${(receivedBytes / 1024).toStringAsFixed(1)} KB / ${(totalBytes / 1024).toStringAsFixed(1)} KB');
-      } else {
-        onProgress?.call('下載中: ${(receivedBytes / 1024).toStringAsFixed(1)} KB');
-      }
+      onProgress?.call('下載中: ${(receivedBytes / 1024).toStringAsFixed(1)} KB${totalBytes > 0 ? " / ${(totalBytes / 1024).toStringAsFixed(1)} KB" : ""}');
     }
 
-    onProgress?.call('下載完成，正在解析數據...');
+    onProgress?.call('下載完成，正在背景解析 CSV...');
     final String body = utf8.decode(bytes);
+    // [指南要求]：使用背景執行緒解析大筆 CSV 資料
     final List<GarbageRoutePoint> allPoints = await compute(_parseCsvIsolate, _CsvParseInput(body.trim()));
 
     if (allPoints.isNotEmpty) {
-      await _dbService.clearAllRoutePoints('ntpc');
       await _dbService.clearAndSaveRoutePointsWithProgress(allPoints, 'ntpc', (saved, total) {
         onProgress?.call('資料庫寫入中: $saved / $total 筆');
       });
@@ -124,10 +161,8 @@ class NtpcGarbageService extends BaseGarbageService {
 
   Future<bool> _importFromLocalCSV(void Function(String)? onProgress) async {
     try {
-      onProgress?.call('讀取內部資源中...');
       final String csvContent = await rootBundle.loadString('assets/ntpc_route.csv');
       final List<GarbageRoutePoint> allPoints = _parseCsvIsolate(_CsvParseInput(csvContent));
-      
       if (allPoints.isNotEmpty) {
         await _dbService.clearAndSaveRoutePointsWithProgress(allPoints, 'ntpc', (saved, total) {
           onProgress?.call('載入內部資料: $saved / $total 筆');
@@ -161,9 +196,14 @@ class NtpcGarbageService extends BaseGarbageService {
           for (int i = 1; i < rows.length; i++) {
             final row = rows[i];
             if (row.length < 5) continue;
+            final double lat = double.tryParse(row[idxLat].toString()) ?? 0;
+            final double lng = double.tryParse(row[idxLng].toString()) ?? 0;
+            // 座標合法性檢查
+            if (lat < 22 || lat > 26 || lng < 120 || lng > 122) continue;
+
             trucks.add(GarbageTruck(
               carNumber: row[idxCar].toString(), lineId: row[idxLineId].toString(), location: row[idxLoc].toString(),
-              position: LatLng(double.tryParse(row[idxLat].toString()) ?? 0, double.tryParse(row[idxLng].toString()) ?? 0),
+              position: LatLng(lat, lng),
               updateTime: DateTime.tryParse(row[idxTime].toString()) ?? DateTime.now(),
               isRealTime: true,
             ));
@@ -179,12 +219,8 @@ class NtpcGarbageService extends BaseGarbageService {
   Future<List<GarbageTruck>> findTrucksByTime(int hour, int minute) async {
     final points = await _dbService.findPointsByTime(hour, minute, 'ntpc');
     return points.map((p) => GarbageTruck(
-      carNumber: '預定車', 
-      lineId: p.lineId, 
-      location: p.name, 
-      position: p.position, 
-      updateTime: DateTime.now(),
-      isRealTime: false, // 班表預估
+      carNumber: '預定車', lineId: p.lineId, location: p.name, position: p.position, updateTime: DateTime.now(),
+      isRealTime: false,
     )).toList();
   }
 
