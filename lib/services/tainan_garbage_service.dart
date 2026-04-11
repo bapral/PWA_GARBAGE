@@ -116,18 +116,38 @@ class TainanGarbageService extends BaseGarbageService {
   Future<List<GarbageTruck>> fetchTrucks() async {
     try {
       String targetUrl = dynamicApiUrl;
-      if (kIsWeb) targetUrl = 'https://api.allorigins.win/raw?url=' + Uri.encodeComponent(targetUrl);
-      final response = await _client.get(Uri.parse(targetUrl)).timeout(const Duration(seconds: 10));
-      if (response.statusCode == 200) {
-        final Map<String, dynamic> data = json.decode(utf8.decode(response.bodyBytes));
+      
+      String body = '';
+      if (kIsWeb) {
+        // [修正]：Web 模式使用 Proxy /get 端點
+        targetUrl = 'https://api.allorigins.win/get?url=' + Uri.encodeComponent(targetUrl);
+        final response = await _client.get(Uri.parse(targetUrl)).timeout(const Duration(seconds: 15));
+        if (response.statusCode == 200) {
+          final Map<String, dynamic> proxyData = json.decode(response.body);
+          body = proxyData['contents'] ?? '';
+        }
+      } else {
+        final response = await _client.get(Uri.parse(targetUrl)).timeout(const Duration(seconds: 10));
+        if (response.statusCode == 200) {
+          body = utf8.decode(response.bodyBytes);
+        }
+      }
+
+      if (body.isNotEmpty) {
+        final Map<String, dynamic> data = json.decode(body);
         final List<dynamic> records = data['data'] ?? [];
         return records.map((item) => GarbageTruck(
-          carNumber: item['car']?.toString() ?? '未知', lineId: item['linid']?.toString() ?? '', location: item['location']?.toString() ?? '行駛中',
+          carNumber: item['car']?.toString() ?? '未知', 
+          lineId: item['linid']?.toString() ?? '', 
+          location: item['location']?.toString() ?? '行駛中',
           position: LatLng(double.tryParse(item['y']?.toString() ?? '0') ?? 0, double.tryParse(item['x']?.toString() ?? '0') ?? 0),
-          updateTime: DateTime.now(), isRealTime: true,
+          updateTime: DateTime.now(), 
+          isRealTime: true,
         )).toList();
       }
-    } catch (_) {}
+    } catch (e) {
+      DatabaseService.log('Tainan Realtime Fetch Failed', error: e);
+    }
     return await findTrucksByTime(DateTime.now().hour, DateTime.now().minute);
   }
 

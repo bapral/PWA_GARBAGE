@@ -147,7 +147,51 @@ class KaohsiungGarbageService extends BaseGarbageService {
   }
 
   @override
-  Future<List<GarbageTruck>> fetchTrucks() async => await findTrucksByTime(DateTime.now().hour, DateTime.now().minute);
+  Future<List<GarbageTruck>> fetchTrucks() async {
+    try {
+      String targetUrl = 'https://api.kcg.gov.tw/api/service/get/be19a02a-954f-4828-84a1-97ca035bc383';
+      
+      String body = '';
+      if (kIsWeb) {
+        targetUrl = 'https://api.allorigins.win/get?url=' + Uri.encodeComponent(targetUrl);
+        final response = await _client.get(Uri.parse(targetUrl)).timeout(const Duration(seconds: 15));
+        if (response.statusCode == 200) {
+          final Map<String, dynamic> proxyData = json.decode(response.body);
+          body = proxyData['contents'] ?? '';
+        }
+      } else {
+        final response = await _client.get(Uri.parse(targetUrl)).timeout(const Duration(seconds: 15));
+        if (response.statusCode == 200) {
+          body = response.body;
+        }
+      }
+
+      if (body.isNotEmpty) {
+        final Map<String, dynamic> data = json.decode(body);
+        final List<dynamic> records = data['data'] ?? [];
+        return records.map((item) {
+          double? lat; double? lng;
+          final String coordStr = (item['經緯度'] ?? '').toString();
+          if (coordStr.contains(',')) {
+            final parts = coordStr.split(',');
+            lat = double.tryParse(parts[0].trim());
+            lng = double.tryParse(parts[1].trim());
+          }
+          return GarbageTruck(
+            carNumber: (item['車牌號碼'] ?? '未知').toString(),
+            lineId: (item['路線名稱'] ?? '').toString(),
+            location: (item['停留點名稱'] ?? '移動中').toString(),
+            position: LatLng(lat ?? 0, lng ?? 0),
+            updateTime: DateTime.now(),
+            isRealTime: true,
+          );
+        }).where((t) => t.position.latitude > 20).toList();
+      }
+    } catch (e) {
+      DatabaseService.log('Kaohsiung Realtime Fetch Failed', error: e);
+    }
+    return await findTrucksByTime(DateTime.now().hour, DateTime.now().minute);
+  }
 
   @override
   Future<List<GarbageTruck>> findTrucksByTime(int hour, int minute) async {
