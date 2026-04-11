@@ -45,6 +45,38 @@ List<GarbageRoutePoint> _parseCsvIsolate(_CsvParseInput input) {
 
 class _CsvParseInput { final String csvBody; const _CsvParseInput(this.csvBody); }
 
+/// 內部使用的即時車輛解析封裝物件。
+class _NtpcTruckParseInput { final String body; final List<String> header; const _NtpcTruckParseInput(this.body, this.header); }
+
+/// 解析新北市即時車輛 CSV 資料的 Isolate 函式。
+List<GarbageTruck> _parseNtpcTrucksIsolate(_NtpcTruckParseInput input) {
+  final List<List<dynamic>> rows = const CsvToListConverter(shouldParseNumbers: false, eol: '\n').convert(input.body.trim());
+  if (rows.length <= 1) return [];
+  
+  final h = input.header;
+  List<GarbageTruck> trucks = [];
+  
+  for (int i = 1; i < rows.length; i++) {
+    final r = rows[i];
+    if (r.length < 5) continue;
+    
+    final double lat = double.tryParse(r[h.indexOf('latitude')].toString()) ?? 0;
+    final double lng = double.tryParse(r[h.indexOf('longitude')].toString()) ?? 0;
+    
+    if (lat < 22 || lat > 26 || lng < 120 || lng > 122) continue;
+    
+    trucks.add(GarbageTruck(
+      carNumber: r[h.indexOf('car')].toString(), 
+      lineId: r[h.indexOf('lineid')].toString(), 
+      location: r[h.indexOf('location')].toString(),
+      position: LatLng(lat, lng), 
+      updateTime: DateTime.tryParse(r[h.indexOf('time')].toString()) ?? DateTime.now(), 
+      isRealTime: true,
+    ));
+  }
+  return trucks;
+}
+
 class NtpcGarbageService extends BaseGarbageService {
   static const String apiUrl = 'https://data.ntpc.gov.tw/api/datasets/28ab4122-60e1-4065-98e5-abccb69aaca6/csv';
   static const String routeUrl = 'https://data.ntpc.gov.tw/api/datasets/edc3ad26-8ae7-4916-a00b-bc6048d19bf8/csv';
@@ -130,25 +162,23 @@ class NtpcGarbageService extends BaseGarbageService {
       String req = '$apiUrl?size=20000&_t=${DateTime.now().millisecondsSinceEpoch}';
       if (kIsWeb) req = 'https://api.allorigins.win/raw?url=' + Uri.encodeComponent(req);
       final res = await _client.get(Uri.parse(req), headers: _headers).timeout(const Duration(seconds: 10));
+      
       if (res.statusCode == 200) {
-        final List<List<dynamic>> rows = const CsvToListConverter(shouldParseNumbers: false, eol: '\n').convert(res.body.trim());
-        if (rows.length > 1) {
-          final h = rows[0].map((e) => e.toString().toLowerCase().trim()).toList();
-          List<GarbageTruck> trucks = [];
-          for (int i = 1; i < rows.length; i++) {
-            final r = rows[i]; if (r.length < 5) continue;
-            final double lat = double.tryParse(r[h.indexOf('latitude')].toString()) ?? 0;
-            final double lng = double.tryParse(r[h.indexOf('longitude')].toString()) ?? 0;
-            if (lat < 22 || lat > 26 || lng < 120 || lng > 122) continue;
-            trucks.add(GarbageTruck(
-              carNumber: r[h.indexOf('car')].toString(), lineId: r[h.indexOf('lineid')].toString(), location: r[h.indexOf('location')].toString(),
-              position: LatLng(lat, lng), updateTime: DateTime.tryParse(r[h.indexOf('time')].toString()) ?? DateTime.now(), isRealTime: true,
-            ));
-          }
-          return trucks;
+        // 先在主線程取得標頭 (Header)，用於 Isolate 內的索引查找
+        final List<List<dynamic>> rows = const CsvToListConverter(shouldParseNumbers: false, eol: '\n').convert(res.body.substring(0, 500));
+        if (rows.isNotEmpty) {
+          final header = rows[0].map((e) => e.toString().toLowerCase().trim()).toList();
+          
+          // 使用 compute 將龐大的 CSV 資料解析移至背景
+          return await compute(
+            _parseNtpcTrucksIsolate, 
+            _NtpcTruckParseInput(res.body, header)
+          );
         }
       }
-    } catch (_) {}
+    } catch (e) {
+      DatabaseService.log('Ntpc Realtime Fetch Failed', error: e);
+    }
     return await findTrucksByTime(DateTime.now().hour, DateTime.now().minute);
   }
 

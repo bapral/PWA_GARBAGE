@@ -1,6 +1,10 @@
 /// [整體程式說明]
 /// 本文件定義了台中市（Taichung）的垃圾清運服務實作。
-/// 遵循 GARBAGE_DATA_GUIDE.md 實作 ISO T 時間格式化、車牌映射與座標範圍驗證。
+/// 核心邏輯：
+/// 1. 唯一識別碼：以「車牌號碼 (car_licence)」作為動態與靜態資料的映射紐帶。
+/// 2. ISO T 解析：支援 "20240411T093000" 這種包含日期與 T 字元的時間格式。
+/// 3. 週循環排程：自動判定當前星期幾，若該點位當天不收運，則找出一週內最近一次收運的時間。
+/// 4. 混合資料源：靜態班表 (rid=68d1a87f...) + 動態 API (rid=c923ad20...)。
 
 import 'package:latlong2/latlong.dart';
 import 'package:http/http.dart' as http;
@@ -11,16 +15,17 @@ import '../models/garbage_route_point.dart';
 import 'database_service.dart';
 import 'base_garbage_service.dart';
 import '../utils/time_utils.dart';
-import 'package:package_info_plus/package_info_plus.dart';
 import 'package:flutter/services.dart' show rootBundle;
 import 'package:flutter/foundation.dart';
 
 class TaichungGarbageService extends BaseGarbageService {
+  // 台中市定時定點收運地點 API
   static const String routeApiUrl = 'https://newdatacenter.taichung.gov.tw/api/v1/no-auth/resource.download?rid=68d1a87f-7baa-4b50-8408-c36a3a7eda68';
+  // 台中市垃圾車即時動態 API
   static const String dynamicApiUrl = 'https://newdatacenter.taichung.gov.tw/api/v1/no-auth/resource.download?rid=c923ad20-2ec6-43b9-b3ab-54527e99f7bc';
 
-  // [重要] 資產版本號，每次更新 assets/*.json 後增加此數字可強制所有使用者升級
-  static const String requiredAssetVersion = '20260411_v2'; 
+  // [重要] 資產版本號，用於強制更新本地 SQLite 資料庫
+  static const String requiredAssetVersion = '20260411_v3'; 
 
   final DatabaseService _dbService = DatabaseService();
   final http.Client _client;
@@ -35,132 +40,183 @@ class TaichungGarbageService extends BaseGarbageService {
     final String? storedVersion = await _dbService.getStoredVersion('taichung');
     final int currentCount = await _dbService.getTotalCount('taichung');
 
-    if (!force) {
-      // [智能補全]：版本不符或筆數不足 15,000 時自動從 Assets 升級
-      if (storedVersion != requiredAssetVersion || currentCount < 15000) {
-        onProgress?.call('偵測到資料版本過舊，正在升級台中市預設點位...');
-        await _importFromLocalAssets(onProgress);
-        await _dbService.updateVersion(requiredAssetVersion, 'taichung');
-      }
+    if (!force && storedVersion == requiredAssetVersion && currentCount > 10000) {
       return;
     }
-    // ... (rest of methods unchanged)
 
-    onProgress?.call('正在更新台中市資料...');
+    onProgress?.call('正在同步台中市最新班表資料...');
+    bool apiSuccess = false;
     try {
-      onProgress?.call('正在獲取 API 動態快照...');
-      String targetDynamicUrl = '$dynamicApiUrl&limit=20000';
-      if (kIsWeb) targetDynamicUrl = 'https://api.allorigins.win/raw?url=' + Uri.encodeComponent(targetDynamicUrl);
-      final dynamicResponse = await _client.get(Uri.parse(targetDynamicUrl)).timeout(const Duration(seconds: 10));
-      Map<String, LatLng> carPositions = {};
-      if (dynamicResponse.statusCode == 200) {
-        final List<dynamic> dynamicData = json.decode(dynamicResponse.body);
-        for (var item in dynamicData) {
-          final String carNo = item['car']?.toString() ?? '';
-          final double? lng = double.tryParse(item['X']?.toString() ?? '');
-          final double? lat = double.tryParse(item['Y']?.toString() ?? '');
-          if (carNo.isNotEmpty && lat != null && lng != null) {
-            if (lat >= 22 && lat <= 26 && lng >= 120 && lng <= 122) carPositions[carNo] = LatLng(lat, lng);
+      // 1. 下載班表 JSON ( rid=68d1... )
+      String targetUrl = routeApiUrl;
+      if (kIsWeb) targetUrl = 'https://api.allorigins.win/raw?url=' + Uri.encodeComponent(targetUrl);
+      
+      final response = await _client.get(Uri.parse(targetUrl)).timeout(const Duration(seconds: 15));
+      if (response.statusCode == 200) {
+        final String body = utf8.decode(response.bodyBytes);
+        final List<GarbageRoutePoint> allPoints = await compute(_parseTaichungScheduleIsolate, body);
+        
+        if (allPoints.isNotEmpty) {
+          onProgress?.call('正在更新資料庫 (${allPoints.length} 筆)...');
+          await _dbService.clearAndSaveRoutePointsWithProgress(
+            allPoints, 
+            'taichung', 
+            (saved, total) => onProgress?.call('資料寫入中: $saved / $total 筆')
+          );
+          apiSuccess = true;
+        }
+      }
+    } catch (e) {
+      DatabaseService.log('Taichung API Sync Failed', error: e);
+    }
+
+    if (apiSuccess) {
+      await _dbService.updateVersion(requiredAssetVersion, 'taichung');
+      onProgress?.call('台中市班表更新成功！');
+    } else {
+      // 若 API 失敗，嘗試從本地 Assets 載入
+      if (currentCount < 100) {
+        onProgress?.call('雲端同步失敗，改從備援資料恢復...');
+        await _importFromLocalAssets(onProgress);
+      } else {
+        onProgress?.call('連線失敗，保留現有本地資料。');
+      }
+    }
+  }
+
+  /// 在背景 Isolate 解析台中班表 JSON。
+  static List<GarbageRoutePoint> _parseTaichungScheduleIsolate(String body) {
+    final List<dynamic> data = json.decode(body);
+    List<GarbageRoutePoint> points = [];
+    final int weekday = DateTime.now().weekday; // 1-7 (週一到週日)
+
+    for (int i = 0; i < data.length; i++) {
+      final item = data[i];
+      final String carNo = (item['car_licence'] ?? '').toString();
+      if (carNo.isEmpty) continue;
+
+      // [智慧選時邏輯]：先找當天，若沒收則找這週最早有收的時間
+      String rawTime = (item['g_d${weekday}_time_s'] ?? '').toString();
+      if (rawTime.isEmpty || rawTime == 'null') {
+        for (int d = 1; d <= 7; d++) {
+          final String altTime = (item['g_d${d}_time_s'] ?? '').toString();
+          if (altTime.isNotEmpty && altTime != 'null') {
+            rawTime = altTime;
+            break;
           }
         }
       }
 
-      onProgress?.call('正在從雲端下載班表...');
-      final String content = await _downloadWithProgress(onProgress, routeApiUrl, 20);
-      final List<GarbageRoutePoint> allPoints = _parseTaichungJson(content, carPositions);
-      
-      if (allPoints.isNotEmpty) {
-        onProgress?.call('正在儲存至資料庫...');
-        await _dbService.clearAndSaveRoutePointsWithProgress(allPoints, 'taichung', (saved, total) => onProgress?.call('資料庫寫入中: $saved / $total 筆'));
-        onProgress?.call('台中市同步完成！');
-      }
-    } catch (e) {
-      onProgress?.call('同步異常，改從內建資料恢復...');
-      await _importFromLocalAssets(onProgress);
-    }
-  }
+      if (rawTime.isEmpty || rawTime == 'null') continue;
 
-  List<GarbageRoutePoint> _parseTaichungJson(String content, Map<String, LatLng> carPositions) {
-    final List<dynamic> scheduleData = json.decode(content);
-    List<GarbageRoutePoint> allPoints = [];
-    int dayOfWeek = DateTime.now().weekday;
-    for (int i = 0; i < scheduleData.length; i++) {
-      final item = scheduleData[i];
-      final String carNo = item['car_licence']?.toString() ?? '';
-      String rawTime = item['g_d${dayOfWeek}_time_s']?.toString() ?? '';
-      if (rawTime.isEmpty) {
-        for (int d = 1; d <= 7; d++) {
-          rawTime = item['g_d${d}_time_s']?.toString() ?? '';
-          if (rawTime.isNotEmpty) break;
-        }
+      // 座標處理：X 為經度，Y 為緯度
+      final double? lat = double.tryParse(item['Y']?.toString() ?? '');
+      final double? lng = double.tryParse(item['X']?.toString() ?? '');
+
+      if (lat != null && lng != null) {
+        final String area = item['area']?.toString() ?? '';
+        final String village = item['village']?.toString() ?? '';
+        final String siteName = item['caption']?.toString() ?? '定時收運點';
+
+        points.add(GarbageRoutePoint(
+          lineId: carNo, // 以車牌為識別 Key
+          lineName: '$area$village',
+          rank: i,
+          name: siteName,
+          position: LatLng(lat, lng),
+          arrivalTime: TimeUtils.formatTo24Hour(rawTime),
+        ));
       }
-      if (rawTime.isEmpty) continue;
-      allPoints.add(GarbageRoutePoint(
-        lineId: carNo, lineName: '${item['area'] ?? ''}${item['village'] ?? ''} ($carNo)',
-        rank: i, name: item['caption']?.toString() ?? '未知站點',
-        position: carPositions[carNo] ?? const LatLng(24.147, 120.673),
-        arrivalTime: TimeUtils.formatTo24Hour(rawTime),
-      ));
     }
-    return allPoints;
+    return points;
   }
 
   Future<void> _importFromLocalAssets(void Function(String)? onProgress) async {
     try {
       final String content = await rootBundle.loadString('assets/taichung_route.json');
-      final List<GarbageRoutePoint> allPoints = await compute((String c) => _parseTaichungJson(c, {}), content);
+      final List<GarbageRoutePoint> allPoints = await compute(_parseTaichungScheduleIsolate, content);
       if (allPoints.isNotEmpty) {
-        await _dbService.clearAndSaveRoutePointsWithProgress(allPoints, 'taichung', (saved, total) => onProgress?.call('載入預設點位: $saved / $total 筆'));
+        await _dbService.clearAndSaveRoutePointsWithProgress(
+          allPoints, 
+          'taichung', 
+          (saved, total) => onProgress?.call('載入內建資料: $total 筆')
+        );
       }
     } catch (_) {}
-  }
-
-  Future<String> _downloadWithProgress(void Function(String)? onProgress, String url, int timeout) async {
-    String t = url; if (kIsWeb) t = 'https://api.allorigins.win/raw?url=' + Uri.encodeComponent(url);
-    final req = http.Request('GET', Uri.parse(t));
-    final res = await _client.send(req).timeout(Duration(seconds: timeout));
-    if (res.statusCode != 200) throw Exception('API Error');
-    int received = 0; final List<int> bytes = [];
-    await for (var chunk in res.stream.timeout(Duration(seconds: timeout))) {
-      bytes.addAll(chunk); received += chunk.length;
-      onProgress?.call('下載中: ${(received / 1024).toStringAsFixed(1)} KB');
-    }
-    return utf8.decode(bytes);
   }
 
   @override
   Future<List<GarbageTruck>> fetchTrucks() async {
     try {
-      String t = '$dynamicApiUrl&limit=20000&_t=${DateTime.now().millisecondsSinceEpoch}';
-      if (kIsWeb) t = 'https://api.allorigins.win/raw?url=' + Uri.encodeComponent(t);
-      final res = await _client.get(Uri.parse(t)).timeout(const Duration(seconds: 10));
-      if (res.statusCode == 200) {
-        final List<dynamic> results = json.decode(res.body);
-        return results.map((item) {
-          final String carNo = item['car']?.toString() ?? '未知車號';
-          final double lat = double.tryParse(item['Y']?.toString() ?? '0') ?? 0;
-          final double lng = double.tryParse(item['X']?.toString() ?? '0') ?? 0;
-          DateTime updateTime = DateTime.now();
-          final String? timeStr = item['time']?.toString();
-          if (timeStr != null && timeStr.contains('T')) {
-            try {
-              final String f = '${timeStr.substring(0, 4)}-${timeStr.substring(4, 6)}-${timeStr.substring(6, 8)} ${timeStr.substring(9, 11)}:${timeStr.substring(11, 13)}:${timeStr.substring(13, 15)}';
-              updateTime = DateTime.tryParse(f) ?? DateTime.now();
-            } catch (_) {}
+      // 抓取即時座標 API (rid=c923...)
+      String targetUrl = '$dynamicApiUrl&limit=20000&_t=${DateTime.now().millisecondsSinceEpoch}';
+      if (kIsWeb) targetUrl = 'https://api.allorigins.win/raw?url=' + Uri.encodeComponent(targetUrl);
+      
+      final response = await _client.get(Uri.parse(targetUrl)).timeout(const Duration(seconds: 15));
+      if (response.statusCode == 200) {
+        final List<dynamic> data = json.decode(response.body);
+        List<GarbageTruck> trucks = [];
+
+        for (var item in data) {
+          final String carNo = (item['car'] ?? '').toString();
+          final double? lat = double.tryParse(item['Y']?.toString() ?? '');
+          final double? lng = double.tryParse(item['X']?.toString() ?? '');
+
+          if (carNo.isNotEmpty && lat != null && lng != null && lat > 22 && lat < 26) {
+            // 台中 ISO T 格式解析
+            DateTime updateTime = DateTime.now();
+            final String timeStr = (item['time'] ?? '').toString();
+            if (timeStr.contains('T')) {
+              try {
+                // 格式: 20240411T093000
+                final String f = '${timeStr.substring(0, 4)}-${timeStr.substring(4, 6)}-${timeStr.substring(6, 8)} '
+                                 '${timeStr.substring(9, 11)}:${timeStr.substring(11, 13)}:${timeStr.substring(13, 15)}';
+                updateTime = DateTime.tryParse(f) ?? DateTime.now();
+              } catch (_) {}
+            }
+
+            trucks.add(GarbageTruck(
+              carNumber: carNo,
+              lineId: carNo, // 車牌映射
+              location: (item['location'] ?? '清運中').toString(),
+              position: LatLng(lat, lng),
+              updateTime: updateTime,
+              isRealTime: true,
+            ));
           }
-          return GarbageTruck(carNumber: carNo, lineId: carNo, location: item['location']?.toString() ?? '移動中', position: LatLng(lat, lng), updateTime: updateTime, isRealTime: true);
-        }).where((t) => t.position.latitude >= 22 && t.position.latitude <= 26).toList();
+        }
+        if (trucks.isNotEmpty) return trucks;
       }
-    } catch (_) {}
+    } catch (e) {
+      DatabaseService.log('Taichung Dynamic API Error', error: e);
+    }
+    
+    // 如果 API 失敗，回退到班表推估模式
     return await findTrucksByTime(DateTime.now().hour, DateTime.now().minute);
   }
 
   @override
   Future<List<GarbageTruck>> findTrucksByTime(int hour, int minute) async {
+    // 1. 從資料庫獲取此時段的預定班表
     final points = await _dbService.findPointsByTime(hour, minute, 'taichung');
-    return points.map((p) => GarbageTruck(carNumber: '預定車', lineId: p.lineId, location: '${p.lineName} - ${p.name}', position: p.position, updateTime: DateTime.now(), isRealTime: false)).toList();
+    if (points.isEmpty) return [];
+
+    // 2. 為了實現「混合模式」，嘗試獲取一次即時座標進行映射 (如果可能的話)
+    // 注意：這裡為了效能，通常直接顯示資料庫座標，但在 TaichungGarbageService 中，
+    // 我們已經在 fetchTrucks() 實作了即時映射。findTrucksByTime 主要是給預測模式使用的。
+    return points.map((p) => GarbageTruck(
+      carNumber: '預定車',
+      lineId: p.lineId,
+      location: '${p.lineName} - ${p.name}',
+      position: p.position,
+      updateTime: DateTime.now(),
+      isRealTime: false,
+    )).toList();
   }
 
   @override
-  Future<List<GarbageRoutePoint>> getRouteForLine(String lineId) async => await _dbService.getRoutePoints(lineId, 'taichung');
+  Future<List<GarbageRoutePoint>> getRouteForLine(String lineId) async {
+    // lineId 就是 car_licence
+    return await _dbService.getRoutePoints(lineId, 'taichung');
+  }
 }

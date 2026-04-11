@@ -54,6 +54,36 @@ List<GarbageRoutePoint> _parseTaipeiJsonIsolate(_TaipeiParseInput input) {
   return points;
 }
 
+/// 內部使用的即時車輛解析封裝物件。
+class _TaipeiTruckParseInput { final String body; const _TaipeiTruckParseInput(this.body); }
+
+/// 解析台北市即時車輛 JSON 資料的 Isolate 函式。
+List<GarbageTruck> _parseTaipeiTrucksIsolate(_TaipeiTruckParseInput input) {
+  final Map<String, dynamic> root = json.decode(input.body);
+  final List<dynamic> results = root['result']?['results'] ?? [];
+  
+  List<GarbageTruck> allTrucks = [];
+  for (var item in results) {
+    final double? lat = double.tryParse(item['緯度']?.toString() ?? '0');
+    final double? lng = double.tryParse(item['經度']?.toString() ?? '0');
+    
+    if (lat != null && lng != null && lat > 22 && lat < 26 && item['車號'] != null) {
+      final String lineName = (item['路線'] ?? item['路線名稱'] ?? '').toString();
+      final String carNo = item['車號'].toString();
+      
+      allTrucks.add(GarbageTruck(
+        carNumber: carNo, 
+        lineId: '$lineName ($carNo)',
+        location: (item['地點'] ?? item['位置描述'] ?? '').toString(), 
+        position: LatLng(lat, lng), 
+        updateTime: DateTime.now(), 
+        isRealTime: true,
+      ));
+    }
+  }
+  return allTrucks;
+}
+
 class TaipeiGarbageService extends BaseGarbageService {
   static const String routeUrl = 'https://data.taipei/api/v1/dataset/a6e90031-7ec4-4089-afb5-361a4efe7202?scope=resourceAquire';
   static const String truckUrl = 'https://data.taipei/api/v1/dataset/d394142f-7634-4b4f-8b54-7f4f6e63289a?scope=resourceAcknowledge';
@@ -148,29 +178,11 @@ class TaipeiGarbageService extends BaseGarbageService {
       
       final response = await _client.get(Uri.parse(targetUrl)).timeout(const Duration(seconds: 15));
       if (response.statusCode == 200) {
-        final Map<String, dynamic> root = json.decode(response.body);
-        final List<dynamic> results = root['result']?['results'] ?? [];
-        
-        List<GarbageTruck> allTrucks = [];
-        for (var item in results) {
-          final double? lat = double.tryParse(item['緯度']?.toString() ?? '0');
-          final double? lng = double.tryParse(item['經度']?.toString() ?? '0');
-          
-          // 過濾無效座標且僅顯示有「車號」的即時車輛
-          if (lat != null && lng != null && lat > 22 && lat < 26 && item['車號'] != null) {
-            final String lineName = (item['路線'] ?? item['路線名稱'] ?? '').toString();
-            final String carNo = item['車號'].toString();
-            
-            allTrucks.add(GarbageTruck(
-              carNumber: carNo, 
-              lineId: '$lineName ($carNo)',
-              location: (item['地點'] ?? item['位置描述'] ?? '').toString(), 
-              position: LatLng(lat, lng), 
-              updateTime: DateTime.now(), 
-              isRealTime: true,
-            ));
-          }
-        }
+        // 使用 compute 將大數據解析移至背景 Isolate
+        final List<GarbageTruck> allTrucks = await compute(
+          _parseTaipeiTrucksIsolate, 
+          _TaipeiTruckParseInput(response.body)
+        );
         if (allTrucks.isNotEmpty) return allTrucks;
       }
     } catch (e) {

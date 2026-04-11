@@ -62,6 +62,13 @@ class _MapScreenState extends ConsumerState<MapScreen> {
     _determinePosition(); 
   }
 
+  @override
+  void dispose() {
+    DatabaseService.log('MapScreen 進入 dispose');
+    _mapController.dispose();
+    super.dispose();
+  }
+
   /// 獲取使用者當前的 GPS 位置，並處理權限要求。
   /// 
   /// 此方法會依序檢查定位服務是否啟用、權限是否獲得，最後更新 [_userPosition] 並移動地圖。

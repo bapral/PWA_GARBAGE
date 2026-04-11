@@ -24,8 +24,11 @@ class TimeUtils {
     if (raw.contains('T')) {
       try {
         final parts = raw.split('T');
-        if (parts.length > 1 && parts[1].length >= 4) {
-          time = parts[1].substring(0, 4); // 取 0930
+        if (parts.length > 1) {
+          String timePart = parts[1].replaceAll(RegExp(r'[^0-9]'), '');
+          if (timePart.length >= 4) {
+            time = timePart.substring(0, 4); // 取 0930
+          }
         }
       } catch (_) {}
     }
