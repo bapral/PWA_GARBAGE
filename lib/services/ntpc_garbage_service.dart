@@ -164,21 +164,22 @@ class NtpcGarbageService extends BaseGarbageService {
   @override
   Future<List<GarbageTruck>> fetchTrucks() async {
     try {
-      // 嘗試平衡：8000 筆資料量通常在 2-3MB 之間，大多數 Proxy 仍能穩定傳輸
-      int size = kIsWeb ? 8000 : 20000;
+      // 再次調降筆數至 5000，確保與台北市一致的穩定傳輸體積
+      int size = kIsWeb ? 5000 : 20000;
       String baseApiUrl = 'https://data.ntpc.gov.tw/api/datasets/28ab4122-60e1-4065-98e5-abccb69aaca6/json';
       String req = '$baseApiUrl?size=$size&_t=${DateTime.now().millisecondsSinceEpoch}';
       
       String? body;
       if (kIsWeb) {
-        body = await webFetch(_client, req, timeout: 20);
+        // 新北市反應較慢，Web 代理超時放寬至 25 秒
+        body = await webFetch(_client, req, timeout: 25);
       } else {
         final res = await _client.get(Uri.parse(req), headers: _headers).timeout(const Duration(seconds: 15));
         if (res.statusCode == 200) body = res.body;
       }
 
-      if (body != null && body.isNotEmpty) {
-        final List<dynamic> data = json.decode(body);
+      if (body != null && body.trim().isNotEmpty) {
+        final List<dynamic> data = json.decode(body.trim());
         List<GarbageTruck> trucks = [];
         for (var item in data) {
           final double? lat = double.tryParse(item['latitude']?.toString() ?? '');
