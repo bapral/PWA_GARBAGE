@@ -1,6 +1,6 @@
 /// [整體程式說明]
 /// 本文件定義了台北市（Taipei）的垃圾清運服務實作。
-/// 支援手動強制更新（API）與啟動自動載入（Assets）。
+/// 支援手動強制更新（透過分頁 API 獲取完整 4000+ 筆資料）與啟動自動載入（Assets）。
 
 import 'dart:convert';
 import 'dart:async';
@@ -63,27 +63,51 @@ class TaipeiGarbageService extends BaseGarbageService {
 
     if (!force) {
       if (!hasData) {
-        onProgress?.call('初次啟動，正在快速載入台北市預設班表...');
+        onProgress?.call('初次啟動，正在載入台北市預設點位...');
         await _importFromLocalJson(onProgress);
       }
       return;
     }
 
-    onProgress?.call('正在連線台北市政府 API 獲取最新班表...');
+    onProgress?.call('正在連線台北市政府 API 執行完整同步...');
+    
+    // [優化]：台北市 API 限制單次 1000 筆，我們必須執行分頁抓取
+    List<GarbageRoutePoint> allPoints = [];
     bool apiSuccess = false;
+    const int pageSize = 1000;
+    
     try {
-      String targetUrl = routeUrl + '&limit=20000';
-      if (kIsWeb) targetUrl = 'https://api.allorigins.win/raw?url=' + Uri.encodeComponent(targetUrl);
-      final String content = await _downloadWithProgress(onProgress, targetUrl, 20);
-      final List<GarbageRoutePoint> allPoints = await compute(_parseTaipeiJsonIsolate, _TaipeiParseInput(content));
+      for (int offset = 0; offset <= 6000; offset += pageSize) {
+        onProgress?.call('正在獲取分頁數據: $offset ~ ${offset + pageSize}...');
+        String targetUrl = '$routeUrl&limit=$pageSize&offset=$offset';
+        if (kIsWeb) targetUrl = 'https://api.allorigins.win/raw?url=' + Uri.encodeComponent(targetUrl);
+        
+        final response = await _client.get(Uri.parse(targetUrl)).timeout(const Duration(seconds: 15));
+        if (response.statusCode != 200) break;
+        
+        final List<GarbageRoutePoint> pagePoints = await compute(_parseTaipeiJsonIsolate, _TaipeiParseInput(response.body));
+        if (pagePoints.isEmpty) break;
+        
+        allPoints.addAll(pagePoints);
+        onProgress?.call('已累積獲取: ${allPoints.length} 筆點位');
+        
+        // 如果該頁不滿 1000 筆，代表拿完了
+        if (pagePoints.length < 500) break; 
+      }
+
       if (allPoints.isNotEmpty) {
-        await _dbService.clearAndSaveRoutePointsWithProgress(allPoints, 'taipei', (saved, total) => onProgress?.call('資料庫寫入中: $saved / $total 筆'));
+        onProgress?.call('正在存入資料庫 (${allPoints.length} 筆)...');
+        await _dbService.clearAndSaveRoutePointsWithProgress(allPoints, 'taipei', (saved, total) {
+          onProgress?.call('資料庫更新中: $saved / $total 筆');
+        });
         apiSuccess = true;
       }
-    } catch (_) {}
+    } catch (e) {
+      DatabaseService.log('台北市分頁同步失敗', error: e);
+    }
 
     if (!apiSuccess) {
-      onProgress?.call('雲端連線失敗，正在載入內部備援資料...');
+      onProgress?.call('雲端連線失敗，正在載入備援資料...');
       await _importFromLocalJson(onProgress);
     }
   }
