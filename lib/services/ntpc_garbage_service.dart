@@ -1,6 +1,15 @@
 /// [整體程式說明]
 /// 本文件定義了新北市（NTPC）的垃圾清運服務實作。
 /// 支援手動強制更新（API）與自動智能補全（Assets）。
+/// 核心邏輯包括：
+/// 1. CSV 高效解析：新北市提供巨量 CSV，需透過 Isolate 異步解析並存入資料庫。
+/// 2. PWA 代理輪詢：針對 Web 平台實作分頁代理技術，解決跨網域限制。
+/// 3. 安全標頭要求：必須包含特定 User-Agent 與 Referer 才能通過政府伺服器驗證。
+/// 
+/// [執行順序說明]
+/// 1. `syncDataIfNeeded`：初始化時執行，若筆數不足或版本過舊，則自動觸發資產載入或 API 同步。
+/// 2. `fetchTrucks`：啟動定時輪詢，獲取全市上萬筆垃圾車的即時位置。
+/// 3. `findTrucksByTime`：由 Provider 調用，用於非即時時段的班表推算顯示。
 
 import 'dart:convert';
 import 'dart:async';

@@ -1,24 +1,30 @@
 <!DOCTYPE html>
 <html>
 <head>
+  <!-- 
+    [Web 平台啟動配置]
+    $FLUTTER_BASE_HREF 將由編譯命令 (--base-href) 自動替換，
+    確保在 GitHub Pages 等非根目錄環境下能正確載入資源。
+  -->
   <base href="$FLUTTER_BASE_HREF">
 
   <meta charset="UTF-8">
   <meta content="IE=Edge" http-equiv="X-UA-Compatible">
-  <meta name="description" content="A new Flutter project.">
+  <meta name="description" content="台灣垃圾車即時位置與班表預測地圖 - 整合五都開放資料。">
 
-  <!-- iOS meta tags & icons -->
+  <!-- iOS PWA 支援標記 -->
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black">
-  <meta name="apple-mobile-web-app-title" content="ntpc_garbage_map">
+  <meta name="apple-mobile-web-app-title" content="垃圾車地圖">
   <link rel="apple-touch-icon" href="icons/Icon-192.png">
 
-  <!-- Favicon -->
+  <!-- Favicon 網站圖示 -->
   <link rel="icon" type="image/png" href="favicon.png"/>
 
-  <title>垃圾車地圖</title>
+  <title>台灣垃圾車即時地圖</title>
   <link rel="manifest" href="manifest.json">
 
+  <!-- 啟動前的 CSS 載入動畫 (Native-like Loading) -->
   <style>
     body {
       background-color: #f3f3f3;
@@ -36,8 +42,8 @@
       transition: opacity 0.5s ease;
     }
     .loader {
-      border: 6px solid #f3f3f3;
-      border-top: 6px solid #2196F3;
+      border: 6px solid #e0e0e0;
+      border-top: 6px solid #FFD600; /* 使用與垃圾車主題相近的黃色 */
       border-radius: 50%;
       width: 50px;
       height: 50px;
@@ -49,20 +55,28 @@
       100% { transform: rotate(360deg); }
     }
     .text {
-      font-family: sans-serif;
+      font-family: "PingFang TC", "Microsoft JhengHei", sans-serif;
       color: #666;
+      font-size: 14px;
+      letter-spacing: 1px;
     }
   </style>
 </head>
 <body>
+  <!-- 載入中的視覺提示，當 Flutter 引擎準備就緒後會由 JavaScript 移除 -->
   <div class="loading-container" id="loading">
     <div class="loader"></div>
-    <div class="text">正在啟動地圖系統...</div>
+    <div class="text">正在初始化地圖與班表系統...</div>
   </div>
 
   <script>
     {{flutter_build_config}}
     
+    // [Flutter Web 載入流程]
+    // 1. 監聽視窗載入事件。
+    // 2. 載入 flutter.js 腳本。
+    // 3. 初始化引擎並設定渲染模式 (html 模式在手機瀏覽器相容性較佳)。
+    // 4. 運行應用程式並淡出隱藏載入動畫。
     window.addEventListener('load', function() {
       const script = document.createElement('script');
       script.src = 'flutter.js';
@@ -70,18 +84,18 @@
         _flutter.loader.load({
           onEntrypointLoaded: async function(engineInitializer) {
             const appRunner = await engineInitializer.initializeEngine({
-              renderer: "html",
+              renderer: "html", // 強制使用 HTML 渲染以獲得更好的文字相容性與較小的體積
             });
             await appRunner.runApp();
             
-            // 延遲移除載入畫面，確保介面已呈現
+            // 延遲移除載入畫面，確保介面已呈現，避免白屏閃爍
             setTimeout(() => {
               const loading = document.getElementById('loading');
               if (loading) {
                 loading.style.opacity = '0';
                 setTimeout(() => loading.remove(), 500);
               }
-            }, 500);
+            }, 600);
           }
         });
       };

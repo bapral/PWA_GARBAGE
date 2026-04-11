@@ -1,3 +1,19 @@
+/**
+ * ============================================================================
+ * [Web SQLite Service Worker 說明]
+ * 檔案: sqflite_sw.js
+ * 
+ * 本檔案是由 sqflite_common_ffi_web 工具生成的 Service Worker 核心。
+ * 
+ * [主要職責]
+ * 1. 攔截網路請求：模擬 SQLite 檔案系統的讀寫操作。
+ * 2. 共享存取控制：協調多個標籤頁對同一個 Web 資料庫的存取。
+ * 3. 持久化支援：確保 SQLite 資料能在瀏覽器重新整理後依然保留在 IndexedDB 中。
+ * 
+ * 注意：本檔案體積極大且包含高度混淆的編譯程式碼，請勿手動修改內容。
+ * 若需更新，請透過升級 flutter 套件並重新產生。
+ * ============================================================================
+ */
 (function dartProgram(){function copyProperties(a,b){var s=Object.keys(a)
 for(var r=0;r<s.length;r++){var q=s[r]
 b[q]=a[q]}}function mixinPropertiesHard(a,b){var s=Object.keys(a)

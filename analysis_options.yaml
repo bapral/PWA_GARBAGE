@@ -3,20 +3,34 @@
 # 本文件 (analysis_options.yaml) 用於設定 Dart 分析器的行為。
 # 透過定義 Lint 規則，確保團隊開發中的程式碼品質、一致性與安全性。
 # 良好的規則設定能幫助開發者在編譯前就發現潛在的 Bug 或不佳的寫法。
-#
-# [各區區段功能簡述]
-# 1. include：引用外部定義好的規則集（如 Google 或 Flutter 推薦的規範）。
-# 2. analyzer：設定分析器的特定行為（如排除特定檔案或修改錯誤層級）。
-# 3. linter/rules：自定義專案要啟用或禁用的具體程式碼風格規則。
 # =============================================================================
 
-# 激活 Flutter 官方推薦的 Lint 規則集，這是社群公認的最佳實踐基礎。
+# 激活 Flutter 官方推薦的規則集：包含大多數最佳實踐建議。
 include: package:flutter_lints/flutter.yaml
 
+analyzer:
+  # 排除自動生成的程式碼或特定檔案，不對其進行分析
+  exclude:
+    - "build/**"
+    - "**/*.g.dart"
+    - "**/*.freezed.dart"
+
 linter:
-  # [Linter 規則自定義]
-  # 此區段可針對專案需求微調細項規則。
-  # 所有規則清單可參考: https://dart.dev/lints
+  # [Linter 規則微調]
+  # 在此處啟用或禁用特定規則，以符合本專案的開發習慣。
+  # 完整的規則清單：https://dart.dev/lints
   rules:
-    # avoid_print: false  # 若需要在正式版中保留 print 資訊，可將此設為 false
-    # prefer_single_quotes: true # 強制要求使用單引號字串，維持程式碼整潔
+    # 建議在 production 版本保留基本的 log 輸出
+    avoid_print: false
+    
+    # 強制要求類別成員明確標註存取修飾詞或類型，提高可讀性
+    always_specify_types: false
+    
+    # 建議使用單引號以維持程式碼風格統一
+    prefer_single_quotes: true
+    
+    # 禁止定義但不使用變數，避免程式碼冗餘
+    unused_local_variable: true
+    
+    # 確保 await 只用在 Future 類型上
+    await_only_futures: true

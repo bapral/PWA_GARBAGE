@@ -1,6 +1,15 @@
 /// [整體程式說明]
 /// 本文件定義了台南市（Tainan）的垃圾清運服務實作。
 /// 支援手動強制更新（API）與啟動自動載入（Assets）。
+/// 核心邏輯包括：
+/// 1. 欄位不對稱處理：靜態班表（LATITUDE）與即時動態（y）的欄位大小寫差異化解析。
+/// 2. 順序邏輯：強制使用 `ROUTEORDER` 進行排序，而非依賴 API 回傳順序。
+/// 3. UTF-8 標準化：解決政府 API 中文亂碼問題。
+/// 
+/// [執行順序說明]
+/// 1. `syncDataIfNeeded`：檢索本地資料量，若筆數過低則觸發 API 同步或資產恢復。
+/// 2. `fetchTrucks`：執行 PWA 代理請求或直接連線，抓取台南市垃圾車動態。
+/// 3. `findTrucksByTime`：檢索本地資料庫，用於顯示預定抵達之車輛點位。
 
 import 'package:latlong2/latlong.dart';
 import 'package:http/http.dart' as http;

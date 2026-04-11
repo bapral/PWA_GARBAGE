@@ -1,17 +1,33 @@
+# =============================================================================
+# [GitHub Actions 部署流程說明]
+# 本腳本 (.github/workflows/deploy.yml) 負責自動化構建 Flutter Web 並部署至 GitHub Pages。
+#
+# [執行時機]
+# 當 master 或 main 分支有程式碼推送 (Push) 時自動啟動。
+#
+# [作業步驟]
+# 1. 檢出程式碼：獲取最新的專案原始碼。
+# 2. 設定 Flutter 環境：安裝穩定版的 Flutter SDK。
+# 3. 取得套件：執行 flutter pub get 安裝所有依賴。
+# 4. 編譯 Web 版本：執行編譯命令並設定正確的 base-href 以對應 GitHub Pages 路徑。
+# 5. 上傳成果：將 build/web 資料夾上傳為 GitHub Artifacts。
+# 6. 最終部署：將編譯後的靜態網頁推送至 gh-pages 分支或 Pages 服務。
+# =============================================================================
+
 name: Deploy Flutter Web to GitHub Pages
 
 on:
   push:
     branches:
-      - master # Or master, depending on your default branch
+      - master # 監聽 master 分支（請根據您的預設分支名稱調整，如 master 或 main）
 
-# Sets permissions of the GITHUB_TOKEN to allow deployment to GitHub Pages
+# 設定 GITHUB_TOKEN 的權限，允許部署作業寫入 Pages
 permissions:
   contents: write
   pages: write
   id-token: write
 
-# Allow one concurrent deployment
+# 確保同時只有一個部署作業在執行，避免版本衝突
 concurrency:
   group: "pages"
   cancel-in-progress: true
@@ -20,29 +36,30 @@ jobs:
   build_and_deploy:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout repository
+      - name: 1. 檢出程式碼 (Checkout)
         uses: actions/checkout@v4
 
-      - name: Set up Flutter
+      - name: 2. 初始化 Flutter 環境 (Setup)
         uses: subosito/flutter-action@v2
         with:
-          channel: "stable"
+          channel: "stable" # 使用穩定版頻道
 
-      - name: Install dependencies
+      - name: 3. 下載專案套件 (Pub Get)
         run: flutter pub get
 
-      - name: Build Web
-        # Replace 'PWA_GARBAGE' with your actual repository name if it differs exactly
+      - name: 4. 編譯 Web 版程式 (Build Web)
+        # 注意：--base-href 必須與您的 Repository 名稱一致（含前後斜線）
+        # 這裡設定為 /PWA_GARBAGE/ 以對應 github.com/user/PWA_GARBAGE
         run: flutter build web --base-href /PWA_GARBAGE/
 
-      - name: Setup Pages
+      - name: 5. 設定 Pages 權限
         uses: actions/configure-pages@v4
 
-      - name: Upload artifact
+      - name: 6. 上傳編譯成果 (Upload)
         uses: actions/upload-pages-artifact@v3
         with:
-          path: "build/web"
+          path: "build/web" # 指定編譯後的靜態檔案路徑
 
-      - name: Deploy to GitHub Pages
+      - name: 7. 執行正式部署 (Deploy)
         id: deployment
         uses: actions/deploy-pages@v4

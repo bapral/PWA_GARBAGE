@@ -4,11 +4,11 @@
 /// 本文件充當了 UI（MapScreen）與 Service 層（GarbageService, DatabaseService）之間的協調器。
 ///
 /// [執行順序說明]
-/// 1. 監聽 `citySelectionProvider`，當城市變更時觸發 `GarbageTrucksNotifier` 的重新建構。
-/// 2. `GarbageTrucksNotifier` 初始化時呼叫對應 Service 的 `syncDataIfNeeded` 進行資料庫同步。
-/// 3. 啟動 `Timer.periodic` 每 30 秒呼叫一次 `refresh()` 獲取 API 最新動態。
-/// 4. `predictedTrucksProvider` 根據目前是否處於「預測模式」決定要回傳 API 即時資料還是資料庫班表資料。
-/// 5. UI 層訂閱上述 Provider 並隨之自動重繪。
+/// 1. 監聽 `citySelectionProvider`：當城市變更時觸發 `GarbageTrucksNotifier` 的重新建構。
+/// 2. 資料同步：`GarbageTrucksNotifier` 初始化時呼叫對應 Service 的 `syncDataIfNeeded`。
+/// 3. 定時輪詢：啟動 `Timer.periodic` 每 30 秒呼叫一次 `refresh()` 獲取 API 最新動態。
+/// 4. 預測邏輯：`predictedTrucksProvider` 根據模式決定回傳 API 即時資料或資料庫班表。
+/// 5. UI 重繪：UI 層訂閱上述 Provider 並隨之自動重繪。
 
 import 'dart:async';
 import 'package:flutter/material.dart';

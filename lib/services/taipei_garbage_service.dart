@@ -1,6 +1,15 @@
 /// [整體程式說明]
 /// 本文件定義了台北市（Taipei）的垃圾清運服務實作。
-/// 支援手動強制更新（分頁抓取）與自動強制版本升級（Assets）。
+/// 支援手動強制更新（分頁抓取）與自動版本升級（Assets）。
+/// 核心邏輯包括：
+/// 1. 分頁請求：由於台北市 API 限制，需分段抓取 (limit/offset) 以取得數千筆班表資料。
+/// 2. 分區輪詢：在 PWA 模式下按行政區輪流抓取即時動態，降低單次傳輸體積。
+/// 3. Isolate 解析：針對巨量 JSON 採用獨立執行緒解析，避免主畫面阻塞。
+/// 
+/// [執行順序說明]
+/// 1. `syncDataIfNeeded`：根據 `requiredAssetVersion` 判定是否需連線 API 更新資料庫。
+/// 2. `fetchTrucks`：根據當前平台（Web/Native）選擇對應的抓取與解析策略。
+/// 3. `findTrucksByTime`：檢索本地 SQLite 獲取該時段的預估位置。
 
 import 'dart:convert';
 import 'dart:async';

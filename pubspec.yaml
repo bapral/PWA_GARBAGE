@@ -4,72 +4,71 @@
 # 負責定義專案中繼資料、環境限制、外部套件依賴 (Dependencies) 以及資產資源 (Assets)。
 #
 # [各區段功能簡述]
-# 1. 專案基本資訊：包含專案名稱、描述、版本號以及發佈設定。
-# 2. 執行環境 (Environment)：指定 Dart SDK 的版本範圍，確保開發與執行環境一致。
-# 3. 核心依賴 (Dependencies)：應用程式運行所必須的套件，如地圖 (flutter_map)、狀態管理 (riverpod) 等。
-# 4. 開發依賴 (Dev Dependencies)：僅在開發與測試階段需要的工具，不包含在最終發佈的應用程式中。
-# 5. Flutter 資源配置：定義 Material Design 支援、字體、圖片資產等。
+# 1. 專案基本資訊：包含專案名稱、版本號以及發佈設定。
+# 2. 執行環境 (Environment)：指定 Dart SDK 的版本範圍。
+# 3. 核心依賴 (Dependencies)：應用程式運行所必須的套件，如地圖、狀態管理、資料庫等。
+# 4. Flutter 資源配置：定義圖片、CSV、JSON 等靜態資產。
 # =============================================================================
 
-name: ntpc_garbage_map # 專案名稱：新北市垃圾車地圖（擴展至全台）
-description: "A new Flutter project." # 專案描述：一個新的 Flutter 專案
-# 以下行防止套件被意外發佈到 pub.dev。這對於私有套件是首選。
-publish_to: 'none' # 如果您希望發佈到 pub.dev，請刪除此行
+name: ntpc_garbage_map # 專案名稱：台灣垃圾車即時地圖整合版
+description: "基於 Flutter 的台灣五都垃圾車即時追蹤與班表預測應用程式。"
+publish_to: 'none' # 本專案為私有開發，不發佈至 pub.dev
 
-# 以下定義了應用程式的版本和內部版本號。
-# 版本號是由點分隔的三個數字，例如 1.2.43
-# 後面跟著一個可選的內部版本號，由 + 分隔。
+# 版本號：主版本.次版本.修訂版+內部建置號
+# 每次發佈 Web 或 App 時建議增加內部建置號 (+ 之後的數字)
 version: 1.0.0+6
 
 environment:
-  sdk: ^3.11.4 # 指定 Dart SDK 的版本範圍
+  sdk: ^3.11.4 # 要求 Dart SDK 3.11.4 以上版本，以支援現代語言特性
 
-# [依賴項區段] 
-# 指定專案運作所需的外部套件。
+# [應用程式依賴套件] 
 dependencies:
   flutter:
-    sdk: flutter # Flutter 核心 SDK
+    sdk: flutter # Flutter 核心元件庫
 
-  cupertino_icons: ^1.0.8 # 用於 iOS 風格圖示
+  cupertino_icons: ^1.0.8 # iOS 風格圖示支援
   
-  flutter_riverpod: ^3.3.1 # 狀態管理框架
+  flutter_riverpod: ^3.3.1 # 全域狀態管理：處理城市切換、定位模式與資料同步流
   
-  flutter_map: ^8.2.2 # 互動式地圖元件
+  flutter_map: ^8.2.2 # 地圖底層渲染：基於 Leaflet 的互動式地圖組件
   
-  latlong2: ^0.9.1 # 地理座標計算工具
+  latlong2: ^0.9.1 # 地理座標計算：處理經緯度、距離與方位角
   
-  http: ^1.6.0 # 網路請求套件
+  http: ^1.6.0 # 網路通訊：介接各縣市政府開放資料 API
   
-  geolocator: ^14.0.2 # 獲取 GPS 位置
+  geolocator: ^14.0.2 # 裝置定位：獲取使用者當前 GPS 座標
   
-  intl: ^0.20.2 # 國際化與格式化工具
+  intl: ^0.20.2 # 國際化工具：用於時間格式化與本地化顯示
   
-  sqflite: ^2.4.1 # 本地 SQLite 資料庫 (行動端)
+  sqflite: ^2.4.1 # 本地資料庫 (iOS/Android)：儲存數萬筆清運班表，支援離線預測
   
-  sqflite_common_ffi: ^2.3.3 # 桌面平台 SQLite 支援
+  sqflite_common_ffi: ^2.3.3 # 桌面與單元測試支援：讓資料庫邏輯可在多平台運行
   
-  path: ^1.9.0 # 檔案路徑處理
+  path: ^1.9.0 # 路徑處理：處理資料庫檔案位置
   
-  package_info_plus: ^8.2.1 # 獲取 App 版本資訊
+  package_info_plus: ^8.2.1 # 系統資訊：獲取當前 App 版本與建置號
   
-  csv: ^6.0.0 # 解析 CSV 資料格式
-  sqflite_common_ffi_web: ^1.1.1
+  csv: ^6.0.0 # CSV 解析：處理新北市等縣市的大型 CSV 班表資料
+  
+  sqflite_common_ffi_web: ^1.1.1 # Web 資料庫支援：透過 WASM 與 FFI 在瀏覽器執行 SQLite
 
-# [開發用依賴項]
-# 僅用於開發、自動化測試或靜態分析。
+# [開發環境工具]
 dev_dependencies:
   flutter_test:
-    sdk: flutter # 官方測試框架
+    sdk: flutter # 測試框架
 
-  flutter_lints: ^6.0.0 # 程式碼風格檢查建議
+  flutter_lints: ^6.0.0 # 靜態代碼規則檢查
 
-# [Flutter 特定設定]
+# [資產配置]
 flutter:
-  uses-material-design: true # 啟用 Material Design 視覺語言
+  uses-material-design: true # 啟用現代化 Material UI
 
+  # 定義專案內建的垃圾車班表資產
+  # 當 API 無法連線時，系統會自動載入這些備援資料
   assets:
-    - assets/ntpc_route.csv
-    - assets/taipei_route.json
-    - assets/taichung_route.json
-    - assets/tainan_route.json
+    - assets/ntpc_route.csv      # 新北市班表 (CSV 格式)
+    - assets/taipei_route.json   # 台北市班表 (JSON 格式)
+    - assets/taichung_route.json # 台中市班表 (JSON 格式)
+    - assets/tainan_route.json   # 台南市班表 (JSON 格式)
+    - assets/kaohsiung_route.json # 高雄市班表 (JSON 格式)
     - assets/kaohsiung_route.json

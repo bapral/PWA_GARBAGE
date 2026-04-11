@@ -1,6 +1,14 @@
 /// [整體程式說明]
 /// 本文件為「台灣垃圾車即時地圖」應用程式的啟動核心。
-///
+/// 負責 Flutter 引擎初始化、全域錯誤攔截、以及跨平台（Web/Native）的環境設定。
+/// 採用 Riverpod 作為全域狀態管理的注入點。
+/// 
+/// [執行順序說明]
+/// 1. `runZonedGuarded`：建立全域錯誤區域，捕捉非同步異常。
+/// 2. `WidgetsFlutterBinding.ensureInitialized()`：確保原生通訊管道已就緒。
+/// 3. `DatabaseService.log`：初始化日誌系統。
+/// 4. `runApp`：啟動 MaterialApp 並注入 `ProviderScope`。
+
 import 'dart:async';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';

@@ -1,6 +1,15 @@
 /// [整體程式說明]
 /// 本文件定義了高雄市（Kaohsiung）的垃圾清運服務實作。
 /// 支援手動強制更新（API）與啟動自動載入（Assets）。
+/// 核心邏輯包括：
+/// 1. 座標合併處理：解析高雄市特有的 `"22.6,120.3"` 複合座標字串格式。
+/// 2. 結構變動容錯：彈性支援多層級（data/records/list）的 API JSON 結構。
+/// 3. 多重 API 備援：內建兩組官方 API 網址，當主線斷訊時自動嘗試備援連線。
+/// 
+/// [執行順序說明]
+/// 1. `syncDataIfNeeded`：檢查本地資料庫狀態，並在必要時執行「下載 -> 解析 -> 批次儲存」。
+/// 2. `fetchTrucks`：抓取高雄市動態 API 並透過 PWA Proxy 處理跨網域限制。
+/// 3. `findTrucksByTime`：從 SQLite 檢索班表，提供預測模式所需的車輛資訊。
 
 import 'package:latlong2/latlong.dart';
 import 'package:http/http.dart' as http;
