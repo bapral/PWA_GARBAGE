@@ -104,31 +104,36 @@ class TaipeiGarbageService extends BaseGarbageService {
     final String? storedVersion = await _dbService.getStoredVersion('taipei');
     final int currentCount = await _dbService.getTotalCount('taipei');
 
-    // [優化邏輯]：若版本不符或資料筆數不足 4000 (台北市正常應為 4015 筆)
     if (!force && (storedVersion == requiredAssetVersion && currentCount >= 4000)) {
       return;
     }
 
-    onProgress?.call('正在從台北市政府 API 獲取最新班表...');
+    onProgress?.call('正在獲取台北市最新班表...');
     List<GarbageRoutePoint> allPoints = [];
     bool apiSuccess = false;
     const int pageSize = 1000;
     
     try {
-      // 台北市資料約 4100 筆，我們抓取 5 頁確保完整
+      // 台北市資料約 4100 筆，我們分段抓取以減輕 Proxy 負擔
       for (int offset = 0; offset <= 5000; offset += pageSize) {
         onProgress?.call('下載中: $offset ~ ${offset + pageSize}...');
         String targetUrl = '$routeUrl&limit=$pageSize&offset=$offset';
-        if (kIsWeb) targetUrl = 'https://api.allorigins.win/raw?url=' + Uri.encodeComponent(targetUrl);
         
-        final response = await _client.get(Uri.parse(targetUrl)).timeout(const Duration(seconds: 15));
-        if (response.statusCode != 200) break;
+        String? body;
+        if (kIsWeb) {
+          body = await webFetch(_client, targetUrl, timeout: 20);
+        } else {
+          final res = await _client.get(Uri.parse(targetUrl)).timeout(const Duration(seconds: 15));
+          if (res.statusCode == 200) body = res.body;
+        }
+
+        if (body == null || body.isEmpty) break;
         
-        final List<GarbageRoutePoint> pagePoints = await compute(_parseTaipeiJsonIsolate, _TaipeiParseInput(response.body));
+        final List<GarbageRoutePoint> pagePoints = await compute(_parseTaipeiJsonIsolate, _TaipeiParseInput(body));
         if (pagePoints.isEmpty) break;
         
         allPoints.addAll(pagePoints);
-        if (pagePoints.length < 500) break; // 若最後一頁資料不足，提前結束
+        if (pagePoints.length < 500) break;
       }
 
       if (allPoints.isNotEmpty && allPoints.length >= 3000) {
@@ -144,7 +149,6 @@ class TaipeiGarbageService extends BaseGarbageService {
       await _dbService.updateVersion(requiredAssetVersion, 'taipei');
       onProgress?.call('台北市班表更新成功！');
     } else {
-      // 只有在 API 完全失敗且本地完全沒資料時才載入資產檔 (墊底方案)
       if (currentCount < 100) {
         onProgress?.call('雲端連線失敗，改從備援資料恢復...');
         if (await _importFromLocalJson(onProgress)) {

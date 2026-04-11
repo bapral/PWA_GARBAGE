@@ -17,7 +17,7 @@ abstract class BaseGarbageService {
   Future<List<GarbageTruck>> findTrucksByTime(int hour, int minute);
   Future<List<GarbageRoutePoint>> getRouteForLine(String lineId);
 
-  /// [Web 專用] 高可用性抓取工具：嘗試直接連線與多重代理
+  /// [Web 專用] 高可用性抓取工具：具備自動 JSON 拆包功能的代理輪詢。
   Future<String?> webFetch(http.Client client, String url, {int timeout = 15}) async {
     if (!kIsWeb) return null;
 
@@ -27,23 +27,33 @@ abstract class BaseGarbageService {
       if (res.statusCode == 200) return res.body;
     } catch (_) {}
 
-    // 2. 代理伺服器輪詢清單 (使用 raw 模式以簡化解析)
-    final proxyUrls = [
-      'https://corsproxy.io/?' + Uri.encodeComponent(url),
-      'https://api.allorigins.win/raw?url=' + Uri.encodeComponent(url),
-      'https://thingproxy.freeboard.io/fetch/' + url,
+    // 2. 代理伺服器輪詢清單
+    final proxyConfigs = [
+      {'name': 'CorsProxy.io', 'url': 'https://corsproxy.io/?${Uri.encodeComponent(url)}', 'isJson': false},
+      {'name': 'AllOrigins', 'url': 'https://api.allorigins.win/get?url=${Uri.encodeComponent(url)}', 'isJson': true},
+      {'name': 'CodeTabs', 'url': 'https://api.codetabs.com/v1/proxy?url=${Uri.encodeComponent(url)}', 'isJson': false},
     ];
 
-    for (var target in proxyUrls) {
+    for (var config in proxyConfigs) {
       try {
-        DatabaseService.log('嘗試代理連線: $target');
-        final res = await client.get(Uri.parse(target)).timeout(Duration(seconds: timeout));
+        final String proxyUrl = config['url'] as String;
+        final bool isJsonWrap = config['isJson'] as bool;
+        
+        DatabaseService.log('PWA 連線嘗試: ${config['name']}');
+        
+        final res = await client.get(Uri.parse(proxyUrl)).timeout(Duration(seconds: timeout));
+        
         if (res.statusCode == 200 && res.body.isNotEmpty) {
-          DatabaseService.log('代理連線成功！');
-          return res.body;
+          if (isJsonWrap) {
+            final Map<String, dynamic> data = json.decode(res.body);
+            final String? content = data['contents'];
+            if (content != null && content.isNotEmpty) return content;
+          } else {
+            return res.body;
+          }
         }
       } catch (e) {
-        DatabaseService.log('代理失敗 ($target): $e');
+        DatabaseService.log('${config['name']} 代理請求失敗: $e');
       }
     }
     return null;

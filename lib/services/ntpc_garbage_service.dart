@@ -116,32 +116,37 @@ class NtpcGarbageService extends BaseGarbageService {
     bool apiSuccess = false;
     try {
       String targetUrl = routeUrl + '?size=100000';
-      if (kIsWeb) targetUrl = 'https://api.allorigins.win/raw?url=' + Uri.encodeComponent(targetUrl);
-      apiSuccess = await _syncFromApiWithProgress(onProgress, customUrl: targetUrl, timeout: 15);
-    } catch (_) {}
+      String? body;
+      
+      if (kIsWeb) {
+        // [修正]：同步班表也使用 webFetch 代理
+        body = await webFetch(_client, targetUrl, timeout: 30);
+      } else {
+        final request = http.Request('GET', Uri.parse(targetUrl));
+        _headers.forEach((k, v) => request.headers[k] = v);
+        final streamedResponse = await _client.send(request).timeout(const Duration(seconds: 30));
+        if (streamedResponse.statusCode == 200) {
+          body = utf8.decode(await streamedResponse.stream.toBytes());
+        }
+      }
 
-    if (!apiSuccess) {
+      if (body != null && body.isNotEmpty) {
+        final List<GarbageRoutePoint> allPoints = await compute(_parseCsvIsolate, _CsvParseInput(body.trim()));
+        if (allPoints.isNotEmpty) {
+          await _dbService.clearAndSaveRoutePointsWithProgress(allPoints, 'ntpc', (saved, total) => onProgress?.call('資料庫更新中: $saved / $total 筆'));
+          apiSuccess = true;
+        }
+      }
+    } catch (e) {
+      DatabaseService.log('Ntpc Sync Failed', error: e);
+    }
+
+    if (apiSuccess) {
+      await _dbService.updateVersion(requiredAssetVersion, 'ntpc');
+    } else {
       onProgress?.call('雲端同步失敗，改從內建資料恢復...');
       await _importFromLocalCSV(onProgress);
     }
-  }
-
-  Future<bool> _syncFromApiWithProgress(void Function(String)? onProgress, {required String customUrl, required int timeout}) async {
-    final request = http.Request('GET', Uri.parse(customUrl));
-    _headers.forEach((k, v) => request.headers[k] = v);
-    final streamedResponse = await _client.send(request).timeout(Duration(seconds: timeout));
-    if (streamedResponse.statusCode != 200) return false;
-    int receivedBytes = 0; final List<int> bytes = [];
-    await for (var chunk in streamedResponse.stream.timeout(Duration(seconds: timeout))) {
-      bytes.addAll(chunk); receivedBytes += chunk.length;
-      onProgress?.call('下載中: ${(receivedBytes / 1024).toStringAsFixed(1)} KB');
-    }
-    final List<GarbageRoutePoint> allPoints = await compute(_parseCsvIsolate, _CsvParseInput(utf8.decode(bytes).trim()));
-    if (allPoints.isNotEmpty) {
-      await _dbService.clearAndSaveRoutePointsWithProgress(allPoints, 'ntpc', (saved, total) => onProgress?.call('資料庫更新中: $saved / $total 筆'));
-      return true;
-    }
-    return false;
   }
 
   Future<bool> _importFromLocalCSV(void Function(String)? onProgress) async {
