@@ -52,7 +52,9 @@ class NtpcGarbageService extends BaseGarbageService {
   static const String requiredAssetVersion = '20260411_v2'; 
 
   static const Map<String, String> _headers = {
-    'User-Agent': 'Mozilla/5.0', 'Accept': 'text/csv, application/json', 'Referer': 'https://data.ntpc.gov.tw/',
+    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36',
+    'Accept': 'text/csv, application/json',
+    'Referer': 'https://data.ntpc.gov.tw/',
   };
 
   final DatabaseService _dbService = DatabaseService();

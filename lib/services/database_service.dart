@@ -149,9 +149,24 @@ class DatabaseService {
 
   Future<List<GarbageRoutePoint>> findPointsByTime(int hour, int minute, String city) async {
     final database = await db;
-    // 擴大查詢範圍：前後 60 分鐘 (1小時)，大幅增加預測模式的命中率
-    final String start = _offsetTime(hour, minute, -60);
-    final String end = _offsetTime(hour, minute, 60);
+    
+    // 根據城市特性設定不同的查詢時間窗口
+    int beforeOffset;
+    int afterOffset;
+    
+    if (city == 'taipei' || city == 'ntpc') {
+      // 雙北地區：範圍較精確，目前時間 -5 分鐘 到 +10 分鐘
+      beforeOffset = -5;
+      afterOffset = 10;
+    } else {
+      // 其他地區（台中、台南、高雄）：範圍稍寬，目前時間 -10 分鐘 到 +15 分鐘
+      beforeOffset = -10;
+      afterOffset = 15;
+    }
+
+    final String start = _offsetTime(hour, minute, beforeOffset);
+    final String end = _offsetTime(hour, minute, afterOffset);
+    
     final List<Map<String, dynamic>> maps = await database.query(
       tableName, 
       where: "arrivalTime >= ? AND arrivalTime <= ? AND city = ?", 

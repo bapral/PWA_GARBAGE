@@ -141,33 +141,41 @@ class TaipeiGarbageService extends BaseGarbageService {
   @override
   Future<List<GarbageTruck>> fetchTrucks() async {
     try {
-      List<GarbageTruck> allTrucks = [];
-      for (int offset = 0; offset <= 2000; offset += 1000) {
-        String targetUrl = '$truckUrl&limit=1000&offset=$offset';
-        if (kIsWeb) targetUrl = 'https://api.allorigins.win/raw?url=' + Uri.encodeComponent(targetUrl);
-        final response = await _client.get(Uri.parse(targetUrl)).timeout(const Duration(seconds: 8));
-        if (response.statusCode != 200) break;
-        
+      // 根據 REALTIME_GARBAGE_API_GUIDE.md，台北市即時與班表整合在同一 API
+      // 必須加上 limit=20000 以取得全量資料
+      String targetUrl = '$routeUrl&limit=20000';
+      if (kIsWeb) targetUrl = 'https://api.allorigins.win/raw?url=' + Uri.encodeComponent(targetUrl);
+      
+      final response = await _client.get(Uri.parse(targetUrl)).timeout(const Duration(seconds: 15));
+      if (response.statusCode == 200) {
         final Map<String, dynamic> root = json.decode(response.body);
         final List<dynamic> results = root['result']?['results'] ?? [];
-        if (results.isEmpty) break;
-
+        
+        List<GarbageTruck> allTrucks = [];
         for (var item in results) {
-          final double? lat = double.tryParse(item['緯度']?.toString() ?? item['latitude']?.toString() ?? '0');
-          final double? lng = double.tryParse(item['經度']?.toString() ?? item['longitude']?.toString() ?? '0');
-          if (lat != null && lng != null && lat > 22 && lat < 26) {
-            final String lineName = (item['路線'] ?? item['路線名稱'] ?? item['linename'] ?? '').toString();
-            final String carNo = (item['車號'] ?? item['car'] ?? '未知').toString();
+          final double? lat = double.tryParse(item['緯度']?.toString() ?? '0');
+          final double? lng = double.tryParse(item['經度']?.toString() ?? '0');
+          
+          // 過濾無效座標且僅顯示有「車號」的即時車輛
+          if (lat != null && lng != null && lat > 22 && lat < 26 && item['車號'] != null) {
+            final String lineName = (item['路線'] ?? item['路線名稱'] ?? '').toString();
+            final String carNo = item['車號'].toString();
+            
             allTrucks.add(GarbageTruck(
-              carNumber: carNo, lineId: carNo != '未知' ? '$lineName ($carNo)' : lineName,
-              location: (item['位置描述'] ?? item['location'] ?? '').toString(), position: LatLng(lat, lng), updateTime: DateTime.now(), isRealTime: true,
+              carNumber: carNo, 
+              lineId: '$lineName ($carNo)',
+              location: (item['地點'] ?? item['位置描述'] ?? '').toString(), 
+              position: LatLng(lat, lng), 
+              updateTime: DateTime.now(), 
+              isRealTime: true,
             ));
           }
         }
-        if (results.length < 500) break;
+        if (allTrucks.isNotEmpty) return allTrucks;
       }
-      if (allTrucks.isNotEmpty) return allTrucks;
-    } catch (_) {}
+    } catch (e) {
+      DatabaseService.log('Taipei Realtime Fetch Failed', error: e);
+    }
     return await findTrucksByTime(DateTime.now().hour, DateTime.now().minute);
   }
 
