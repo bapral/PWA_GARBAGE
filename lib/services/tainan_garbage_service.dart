@@ -22,50 +22,32 @@ class TainanGarbageService extends BaseGarbageService {
   final DatabaseService _dbService = DatabaseService();
   final http.Client _client;
 
-  TainanGarbageService({required super.localSourceDir, http.Client? client}) 
-      : _client = client ?? http.Client();
+  TainanGarbageService({required super.localSourceDir, http.Client? client}) : _client = client ?? http.Client();
 
   @override
   void dispose() => _client.close();
 
   @override
   Future<void> syncDataIfNeeded({bool force = false, void Function(String)? onProgress}) async {
-    String currentAppVersion = '1.0.0+1';
-    try {
-      if (!kIsWeb) {
-        final PackageInfo packageInfo = await PackageInfo.fromPlatform();
-        currentAppVersion = '${packageInfo.version}+${packageInfo.buildNumber}';
-      }
-    } catch (_) {}
-
-    final bool hasData = await _dbService.hasData('tainan');
+    final int currentCount = await _dbService.getTotalCount('tainan');
 
     if (!force) {
-      if (!hasData) {
-        onProgress?.call('初次啟動，正在快速載入台南市預設班表...');
+      // [智能補全]：筆數低於 10,000 時自動從 Assets 升級
+      if (currentCount < 10000) {
+        onProgress?.call('偵測到資料版本過舊，正在升級台南市預設點位...');
         await _importFromLocalJson(onProgress);
-        await _dbService.updateVersion(currentAppVersion, 'tainan');
       }
       return;
     }
 
     onProgress?.call('正在初始化台南市資料更新...');
-    
     bool apiSuccess = false;
-    const int timeoutSeconds = 20;
     try {
       String targetUrl = routeApiUrl;
-      if (kIsWeb) {
-        targetUrl = 'https://api.allorigins.win/raw?url=' + Uri.encodeComponent(targetUrl);
-      }
-      
-      onProgress?.call('正在從雲端獲取班表...');
-      final String content = await _downloadWithProgress(onProgress, targetUrl, timeoutSeconds);
-      
-      onProgress?.call('解析數據結構中...');
+      if (kIsWeb) targetUrl = 'https://api.allorigins.win/raw?url=' + Uri.encodeComponent(targetUrl);
+      final String content = await _downloadWithProgress(onProgress, targetUrl, 20);
       final Map<String, dynamic> data = json.decode(content);
       final List<dynamic> records = data['data'] ?? [];
-      
       if (records.isNotEmpty) {
         List<GarbageRoutePoint> allPoints = [];
         for (int i = 0; i < records.length; i++) {
@@ -75,42 +57,23 @@ class TainanGarbageService extends BaseGarbageService {
           if (lat != null && lng != null) {
             if (lat < 22 || lat > 26 || lng < 120 || lng > 122) continue;
             allPoints.add(GarbageRoutePoint(
-              lineId: item['ROUTEID']?.toString() ?? '',
-              lineName: '${item['AREA'] ?? ''} ${item['ROUTEID'] ?? ''}',
+              lineId: item['ROUTEID']?.toString() ?? '', lineName: '${item['AREA'] ?? ''} ${item['ROUTEID'] ?? ''}',
               rank: int.tryParse(item['ROUTEORDER']?.toString() ?? '') ?? i,
-              name: item['POINTNAME']?.toString() ?? '未知站點',
-              position: LatLng(lat, lng),
+              name: item['POINTNAME']?.toString() ?? '未知站點', position: LatLng(lat, lng),
               arrivalTime: TimeUtils.formatTo24Hour(item['TIME']?.toString() ?? ''),
             ));
           }
         }
-        
         if (allPoints.isNotEmpty) {
-          onProgress?.call('正在存入資料庫...');
-          await _dbService.clearAndSaveRoutePointsWithProgress(allPoints, 'tainan', (saved, total) {
-            onProgress?.call('資料庫寫入中: $saved / $total 筆');
-          });
+          await _dbService.clearAndSaveRoutePointsWithProgress(allPoints, 'tainan', (saved, total) => onProgress?.call('資料庫寫入中: $saved / $total 筆'));
           apiSuccess = true;
         }
       }
-    } catch (e) {
-      if (e is TimeoutException) {
-        onProgress?.call('下載超過 $timeoutSeconds 秒已 Timeout...');
-      } else {
-        onProgress?.call('雲端連線失敗...');
-      }
-      DatabaseService.log('Tainan Sync Error', error: e);
-    }
+    } catch (_) {}
 
-    if (apiSuccess) {
-      await _dbService.updateVersion(currentAppVersion, 'tainan');
-      onProgress?.call('台南市同步完成！');
-    } else {
-      onProgress?.call('正在載入內建備援資料...');
-      if (await _importFromLocalJson(onProgress)) {
-        await _dbService.updateVersion(currentAppVersion, 'tainan');
-        onProgress?.call('台南市內建資料載入成功。');
-      }
+    if (!apiSuccess) {
+      onProgress?.call('雲端連線失敗，改從內建資料恢復...');
+      await _importFromLocalJson(onProgress);
     }
   }
 

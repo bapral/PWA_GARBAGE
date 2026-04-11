@@ -29,11 +29,12 @@ class TaichungGarbageService extends BaseGarbageService {
 
   @override
   Future<void> syncDataIfNeeded({bool force = false, void Function(String)? onProgress}) async {
-    final bool hasData = await _dbService.hasData('taichung');
+    final int currentCount = await _dbService.getTotalCount('taichung');
 
     if (!force) {
-      if (!hasData) {
-        onProgress?.call('初次啟動，正在快速載入台中市預設班表...');
+      // [智能補全]：筆數低於 15,000 時自動從 Assets 升級
+      if (currentCount < 15000) {
+        onProgress?.call('偵測到資料版本過舊，正在升級台中市預設點位...');
         await _importFromLocalAssets(onProgress);
       }
       return;
@@ -101,7 +102,7 @@ class TaichungGarbageService extends BaseGarbageService {
   Future<void> _importFromLocalAssets(void Function(String)? onProgress) async {
     try {
       final String content = await rootBundle.loadString('assets/taichung_route.json');
-      final List<GarbageRoutePoint> allPoints = _parseTaichungJson(content, {});
+      final List<GarbageRoutePoint> allPoints = await compute((String c) => _parseTaichungJson(c, {}), content);
       if (allPoints.isNotEmpty) {
         await _dbService.clearAndSaveRoutePointsWithProgress(allPoints, 'taichung', (saved, total) => onProgress?.call('載入預設點位: $saved / $total 筆'));
       }

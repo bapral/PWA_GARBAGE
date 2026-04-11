@@ -1,6 +1,6 @@
 /// [整體程式說明]
 /// 本文件定義了新北市（NTPC）的垃圾清運服務實作。
-/// 支援手動強制更新（API）與啟動自動載入（Assets）。
+/// 支援手動強制更新（API）與自動智能補全（Assets）。
 
 import 'dart:convert';
 import 'dart:async';
@@ -62,18 +62,17 @@ class NtpcGarbageService extends BaseGarbageService {
 
   @override
   Future<void> syncDataIfNeeded({bool force = false, void Function(String)? onProgress}) async {
-    final bool hasData = await _dbService.hasData('ntpc');
+    final int currentCount = await _dbService.getTotalCount('ntpc');
 
     if (!force) {
-      // [模式 1: 自動載入] 僅在沒資料時從內建 Assets 載入，不碰網路
-      if (!hasData) {
-        onProgress?.call('初次啟動，正在快速載入內建班表...');
+      // [智能補全]：若無資料或筆數明顯過少 (少於 20,000)，自動升級載入完整 Assets
+      if (currentCount < 20000) {
+        onProgress?.call('偵測到資料版本過舊，正在升級新北市預設點位...');
         await _importFromLocalCSV(onProgress);
       }
       return;
     }
 
-    // [模式 2: 強制更新] 僅在按下按鈕時觸發，連線政府 API
     onProgress?.call('正在連線新北市政府 API 獲取最新班表...');
     bool apiSuccess = false;
     try {
@@ -93,11 +92,10 @@ class NtpcGarbageService extends BaseGarbageService {
     _headers.forEach((k, v) => request.headers[k] = v);
     final streamedResponse = await _client.send(request).timeout(Duration(seconds: timeout));
     if (streamedResponse.statusCode != 200) return false;
-    final int totalBytes = streamedResponse.contentLength ?? 0;
     int receivedBytes = 0; final List<int> bytes = [];
     await for (var chunk in streamedResponse.stream.timeout(Duration(seconds: timeout))) {
       bytes.addAll(chunk); receivedBytes += chunk.length;
-      onProgress?.call('下載中: ${(receivedBytes / 1024).toStringAsFixed(1)} KB${totalBytes > 0 ? " / ${(totalBytes / 1024).toStringAsFixed(1)} KB" : ""}');
+      onProgress?.call('下載中: ${(receivedBytes / 1024).toStringAsFixed(1)} KB');
     }
     final List<GarbageRoutePoint> allPoints = await compute(_parseCsvIsolate, _CsvParseInput(utf8.decode(bytes).trim()));
     if (allPoints.isNotEmpty) {
@@ -110,9 +108,9 @@ class NtpcGarbageService extends BaseGarbageService {
   Future<bool> _importFromLocalCSV(void Function(String)? onProgress) async {
     try {
       final String csvContent = await rootBundle.loadString('assets/ntpc_route.csv');
-      final List<GarbageRoutePoint> allPoints = _parseCsvIsolate(_CsvParseInput(csvContent));
+      final List<GarbageRoutePoint> allPoints = await compute(_parseCsvIsolate, _CsvParseInput(csvContent));
       if (allPoints.isNotEmpty) {
-        await _dbService.clearAndSaveRoutePointsWithProgress(allPoints, 'ntpc', (saved, total) => onProgress?.call('正在載入預設點位: $saved / $total 筆'));
+        await _dbService.clearAndSaveRoutePointsWithProgress(allPoints, 'ntpc', (saved, total) => onProgress?.call('載入預設點位: $saved / $total 筆'));
         return true;
       }
     } catch (_) {}
