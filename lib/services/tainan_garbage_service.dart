@@ -46,7 +46,7 @@ class TainanGarbageService extends BaseGarbageService {
     onProgress?.call('正在初始化台南市資料更新...');
     
     bool apiSuccess = false;
-    const int timeoutSeconds = 15;
+    const int timeoutSeconds = 20;
     try {
       String targetUrl = routeApiUrl;
       if (kIsWeb) {
@@ -78,11 +78,13 @@ class TainanGarbageService extends BaseGarbageService {
           }
         }
         
-        onProgress?.call('正在存入資料庫...');
-        await _dbService.clearAndSaveRoutePointsWithProgress(allPoints, 'tainan', (saved, total) {
-          onProgress?.call('資料庫寫入中: $saved / $total 筆');
-        });
-        apiSuccess = true;
+        if (allPoints.isNotEmpty) {
+          onProgress?.call('正在存入資料庫...');
+          await _dbService.clearAndSaveRoutePointsWithProgress(allPoints, 'tainan', (saved, total) {
+            onProgress?.call('資料庫寫入中: $saved / $total 筆');
+          });
+          apiSuccess = true; // 標記成功，避免進入備援邏輯
+        }
       }
     } catch (e) {
       if (e is TimeoutException) {
@@ -97,9 +99,12 @@ class TainanGarbageService extends BaseGarbageService {
       await _dbService.updateVersion(currentAppVersion, 'tainan');
       onProgress?.call('台南市同步完成！');
     } else {
+      onProgress?.call('嘗試從內建資產載入...');
       if (await _importFromLocalJson(onProgress)) {
         await _dbService.updateVersion(currentAppVersion, 'tainan');
-        onProgress?.call('台南市內建資料載入完成。');
+        onProgress?.call('台南市內建資料載入成功。');
+      } else {
+        onProgress?.call('台南市資料載入失敗。');
       }
     }
   }
@@ -107,20 +112,15 @@ class TainanGarbageService extends BaseGarbageService {
   Future<String> _downloadWithProgress(void Function(String)? onProgress, String url, int timeout) async {
     final request = http.Request('GET', Uri.parse(url));
     final streamedResponse = await _client.send(request).timeout(Duration(seconds: timeout));
-    if (streamedResponse.statusCode != 200) throw Exception('API Error');
+    if (streamedResponse.statusCode != 200) throw Exception('HTTP Error: ${streamedResponse.statusCode}');
 
-    final int totalBytes = streamedResponse.contentLength ?? 0;
     int receivedBytes = 0;
     final List<int> bytes = [];
 
     await for (var chunk in streamedResponse.stream.timeout(Duration(seconds: timeout))) {
       bytes.addAll(chunk);
       receivedBytes += chunk.length;
-      if (totalBytes > 0) {
-        onProgress?.call('下載中: ${(receivedBytes / 1024).toStringAsFixed(1)} KB / ${(totalBytes / 1024).toStringAsFixed(1)} KB');
-      } else {
-        onProgress?.call('下載中: ${(receivedBytes / 1024).toStringAsFixed(1)} KB');
-      }
+      onProgress?.call('下載中: ${(receivedBytes / 1024).toStringAsFixed(1)} KB');
     }
     return utf8.decode(bytes);
   }
@@ -134,21 +134,29 @@ class TainanGarbageService extends BaseGarbageService {
       List<GarbageRoutePoint> allPoints = [];
       for (int i = 0; i < records.length; i++) {
         final item = records[i];
-        allPoints.add(GarbageRoutePoint(
-          lineId: item['ROUTEID']?.toString() ?? '',
-          lineName: '${item['AREA'] ?? ''} ${item['ROUTEID'] ?? ''}',
-          rank: i,
-          name: item['POINTNAME']?.toString() ?? '未知站點',
-          position: LatLng(double.tryParse(item['LATITUDE']?.toString() ?? '0') ?? 0, double.tryParse(item['LONGITUDE']?.toString() ?? '0') ?? 0),
-          arrivalTime: item['TIME']?.toString() ?? '',
-        ));
+        final double? lat = double.tryParse(item['LATITUDE']?.toString() ?? '');
+        final double? lng = double.tryParse(item['LONGITUDE']?.toString() ?? '');
+        if (lat != null && lng != null) {
+          allPoints.add(GarbageRoutePoint(
+            lineId: item['ROUTEID']?.toString() ?? '',
+            lineName: '${item['AREA'] ?? ''} ${item['ROUTEID'] ?? ''}',
+            rank: int.tryParse(item['ROUTEORDER']?.toString() ?? '') ?? i,
+            name: item['POINTNAME']?.toString() ?? '未知站點',
+            position: LatLng(lat, lng),
+            arrivalTime: item['TIME']?.toString() ?? '',
+          ));
+        }
       }
       
-      await _dbService.clearAndSaveRoutePointsWithProgress(allPoints, 'tainan', (saved, total) {
-        onProgress?.call('載入內建資料: $saved / $total 筆');
-      });
-      return true;
-    } catch (_) {}
+      if (allPoints.isNotEmpty) {
+        await _dbService.clearAndSaveRoutePointsWithProgress(allPoints, 'tainan', (saved, total) {
+          onProgress?.call('載入內建資料: $saved / $total 筆');
+        });
+        return true;
+      }
+    } catch (e) {
+      DatabaseService.log('Tainan Asset Import Error', error: e);
+    }
     return false;
   }
 

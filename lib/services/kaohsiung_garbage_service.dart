@@ -48,7 +48,7 @@ class KaohsiungGarbageService extends BaseGarbageService {
     onProgress?.call('正在初始化高雄市資料更新...');
     
     bool apiSuccess = false;
-    const int timeoutSeconds = 15;
+    const int timeoutSeconds = 20;
 
     for (String url in routeApiUrls) {
       try {
@@ -61,43 +61,9 @@ class KaohsiungGarbageService extends BaseGarbageService {
         final String content = await _downloadWithProgress(onProgress, targetUrl, timeoutSeconds);
         
         onProgress?.call('解析數據結構中...');
-        final dynamic decoded = json.decode(content);
-        List<dynamic> records = [];
-        if (decoded is List) {
-          records = decoded;
-        } else if (decoded is Map) {
-          records = decoded['data'] ?? decoded['records'] ?? [];
-        }
+        final List<GarbageRoutePoint> allPoints = _parseKaohsiungJson(content);
 
-        if (records.isNotEmpty) {
-          List<GarbageRoutePoint> allPoints = [];
-          for (int i = 0; i < records.length; i++) {
-            final item = records[i];
-            double? lat; double? lng;
-            final String coordStr = item['經緯度']?.toString() ?? '';
-            if (coordStr.contains(',')) {
-              final parts = coordStr.split(',');
-              if (parts.length >= 2) {
-                lat = double.tryParse(parts[0].trim());
-                lng = double.tryParse(parts[1].trim());
-              }
-            } else {
-              lat = double.tryParse(item['緯度']?.toString() ?? '');
-              lng = double.tryParse(item['經度']?.toString() ?? '');
-            }
-
-            if (lat != null && lng != null) {
-              allPoints.add(GarbageRoutePoint(
-                lineId: item['清運路線名稱']?.toString() ?? '',
-                lineName: '${item['行政區'] ?? ''} ${item['清運路線名稱'] ?? ''}',
-                rank: i,
-                name: item['停留地點']?.toString() ?? '未知站點',
-                position: LatLng(lat, lng),
-                arrivalTime: item['停留時間']?.toString() ?? '',
-              ));
-            }
-          }
-          
+        if (allPoints.isNotEmpty) {
           onProgress?.call('正在寫入資料庫...');
           await _dbService.clearAndSaveRoutePointsWithProgress(allPoints, 'kaohsiung', (saved, total) {
             onProgress?.call('資料庫寫入中: $saved / $total 筆');
@@ -120,28 +86,73 @@ class KaohsiungGarbageService extends BaseGarbageService {
       onProgress?.call('雲端連線失敗，正在載入內建資產...');
       if (await _importFromLocalJson(onProgress)) {
         await _dbService.updateVersion(currentAppVersion, 'kaohsiung');
-        onProgress?.call('高雄市內建資料載入完成。');
+        onProgress?.call('高雄市內建資料載入成功。');
       }
     }
+  }
+
+  /// 高雄市 JSON 解析邏輯優化：增加多種 Key 支援
+  List<GarbageRoutePoint> _parseKaohsiungJson(String content) {
+    final dynamic decoded = json.decode(content);
+    List<dynamic> records = [];
+    if (decoded is List) {
+      records = decoded;
+    } else if (decoded is Map) {
+      records = decoded['data'] ?? decoded['records'] ?? [];
+    }
+
+    List<GarbageRoutePoint> points = [];
+    for (int i = 0; i < records.length; i++) {
+      final item = records[i];
+      
+      // 經緯度解析
+      double? lat; double? lng;
+      final String coordStr = (item['經緯度'] ?? item['coordinate'] ?? '').toString();
+      if (coordStr.contains(',')) {
+        final parts = coordStr.split(',');
+        lat = double.tryParse(parts[0].trim());
+        lng = double.tryParse(parts[1].trim());
+      } else {
+        lat = double.tryParse((item['緯度'] ?? item['latitude'] ?? '0').toString());
+        lng = double.tryParse((item['經度'] ?? item['longitude'] ?? '0').toString());
+      }
+
+      // 路線、名稱與時間
+      final String lineId = (item['清運路線名稱'] ?? item['路線名稱'] ?? item['車次'] ?? item['lineid'] ?? '未知').toString();
+      final String area = (item['行政區'] ?? item['town'] ?? '').toString();
+      final String name = (item['停留地點'] ?? item['停留點'] ?? item['caption'] ?? '未知站點').toString();
+      
+      String timeRaw = (item['停留時間'] ?? item['停留時段'] ?? item['time'] ?? '').toString();
+      String timeStr = timeRaw.contains('-') ? timeRaw.split('-')[0].trim() : timeRaw;
+      if (timeStr.length == 4 && !timeStr.contains(':')) {
+        timeStr = '${timeStr.substring(0, 2)}:${timeStr.substring(2, 4)}';
+      }
+
+      if (lat != null && lng != null && lat != 0 && timeStr.isNotEmpty) {
+        points.add(GarbageRoutePoint(
+          lineId: lineId,
+          lineName: area.isNotEmpty ? '$area $lineId' : lineId,
+          rank: i,
+          name: name,
+          position: LatLng(lat, lng),
+          arrivalTime: timeStr,
+        ));
+      }
+    }
+    return points;
   }
 
   Future<String> _downloadWithProgress(void Function(String)? onProgress, String url, int timeout) async {
     final request = http.Request('GET', Uri.parse(url));
     final streamedResponse = await _client.send(request).timeout(Duration(seconds: timeout));
-    if (streamedResponse.statusCode != 200) throw Exception('API Error');
+    if (streamedResponse.statusCode != 200) throw Exception('HTTP Error');
 
-    final int totalBytes = streamedResponse.contentLength ?? 0;
     int receivedBytes = 0;
     final List<int> bytes = [];
-
     await for (var chunk in streamedResponse.stream.timeout(Duration(seconds: timeout))) {
       bytes.addAll(chunk);
       receivedBytes += chunk.length;
-      if (totalBytes > 0) {
-        onProgress?.call('下載中: ${(receivedBytes / 1024).toStringAsFixed(1)} KB / ${(totalBytes / 1024).toStringAsFixed(1)} KB');
-      } else {
-        onProgress?.call('下載中: ${(receivedBytes / 1024).toStringAsFixed(1)} KB');
-      }
+      onProgress?.call('下載中: ${(receivedBytes / 1024).toStringAsFixed(1)} KB');
     }
     return utf8.decode(bytes);
   }
@@ -149,33 +160,17 @@ class KaohsiungGarbageService extends BaseGarbageService {
   Future<bool> _importFromLocalJson(void Function(String)? onProgress) async {
     try {
       final String content = await rootBundle.loadString('assets/kaohsiung_route.json');
-      final dynamic decoded = json.decode(content);
-      List<dynamic> records = decoded is Map ? (decoded['data'] ?? decoded['records'] ?? []) : decoded;
+      final List<GarbageRoutePoint> allPoints = _parseKaohsiungJson(content);
       
-      List<GarbageRoutePoint> allPoints = [];
-      for (int i = 0; i < records.length; i++) {
-        final item = records[i];
-        final String coordStr = item['經緯度']?.toString() ?? '';
-        double lat = 0; double lng = 0;
-        if (coordStr.contains(',')) {
-          final p = coordStr.split(',');
-          lat = double.tryParse(p[0]) ?? 0; lng = double.tryParse(p[1]) ?? 0;
-        }
-        allPoints.add(GarbageRoutePoint(
-          lineId: item['清運路線名稱']?.toString() ?? '',
-          lineName: item['行政區']?.toString() ?? '',
-          rank: i,
-          name: item['停留地點']?.toString() ?? '',
-          position: LatLng(lat, lng),
-          arrivalTime: item['停留時間']?.toString() ?? '',
-        ));
+      if (allPoints.isNotEmpty) {
+        await _dbService.clearAndSaveRoutePointsWithProgress(allPoints, 'kaohsiung', (saved, total) {
+          onProgress?.call('載入內建資料: $saved / $total 筆');
+        });
+        return true;
       }
-      
-      await _dbService.clearAndSaveRoutePointsWithProgress(allPoints, 'kaohsiung', (saved, total) {
-        onProgress?.call('載入內建資料: $saved / $total 筆');
-      });
-      return true;
-    } catch (_) {}
+    } catch (e) {
+      DatabaseService.log('Kaohsiung Asset Import Error', error: e);
+    }
     return false;
   }
 
