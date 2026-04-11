@@ -235,7 +235,7 @@ class _MapScreenState extends ConsumerState<MapScreen> {
     if (isNow) {
       predictionText = '目前即時線上車輛';
     } else if (isAbsolute) {
-      predictionText = '檢索目標時間: ${targetTime!.hour}:${targetTime.minute.toString().padLeft(2, '0')}';
+      predictionText = '檢索目標時間: ${targetTime!.hour.toString().padLeft(2, '0')}:${targetTime.minute.toString().padLeft(2, '0')}';
     } else if (isRelative) {
       predictionText = '預測位置: ${duration.inHours > 0 ? '${duration.inHours}小時' : ''}${duration.inMinutes % 60}分鐘後';
     }
@@ -820,7 +820,7 @@ class _MapScreenState extends ConsumerState<MapScreen> {
               SelectableText('目前位置描述: ${truck.location}', style: const TextStyle(fontSize: 16)),
               const SizedBox(height: 5),
               SelectableText(
-                '${truck.isRealTime ? "GPS 更新時間" : "資料庫預定抵達時間"}: ${truck.updateTime.hour}:${truck.updateTime.minute.toString().padLeft(2, '0')}', 
+                '${truck.isRealTime ? "GPS 更新時間" : "資料庫預定抵達時間"}: ${truck.updateTime.hour.toString().padLeft(2, '0')}:${truck.updateTime.minute.toString().padLeft(2, '0')}', 
                 style: const TextStyle(color: Colors.grey)
               ),
               const SizedBox(height: 20),
