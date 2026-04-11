@@ -159,8 +159,8 @@ class NtpcGarbageService extends BaseGarbageService {
   @override
   Future<List<GarbageTruck>> fetchTrucks() async {
     try {
-      // PWA 模式極限減壓：僅抓取 3000 筆資料，避免代理伺服器傳輸失敗
-      int size = kIsWeb ? 3000 : 20000;
+      // 嘗試平衡：8000 筆資料量通常在 2-3MB 之間，大多數 Proxy 仍能穩定傳輸
+      int size = kIsWeb ? 8000 : 20000;
       String baseApiUrl = 'https://data.ntpc.gov.tw/api/datasets/28ab4122-60e1-4065-98e5-abccb69aaca6/json';
       String req = '$baseApiUrl?size=$size&_t=${DateTime.now().millisecondsSinceEpoch}';
       
