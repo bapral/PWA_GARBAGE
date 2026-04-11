@@ -160,20 +160,35 @@ class NtpcGarbageService extends BaseGarbageService {
   Future<List<GarbageTruck>> fetchTrucks() async {
     try {
       String req = '$apiUrl?size=20000&_t=${DateTime.now().millisecondsSinceEpoch}';
-      if (kIsWeb) req = 'https://api.allorigins.win/raw?url=' + Uri.encodeComponent(req);
-      final res = await _client.get(Uri.parse(req), headers: _headers).timeout(const Duration(seconds: 10));
       
-      if (res.statusCode == 200) {
-        // 先在主線程取得標頭 (Header)，用於 Isolate 內的索引查找
-        final List<List<dynamic>> rows = const CsvToListConverter(shouldParseNumbers: false, eol: '\n').convert(res.body.substring(0, 500));
-        if (rows.isNotEmpty) {
-          final header = rows[0].map((e) => e.toString().toLowerCase().trim()).toList();
+      // Web 環境專用的 CORS Proxy 處理
+      if (kIsWeb) {
+        // [修正]：allorigins.win 的 /raw 端點有時會因為 Header 問題被封鎖
+        // 嘗試使用更穩定的 Proxy 呼叫方式
+        req = 'https://api.allorigins.win/get?url=' + Uri.encodeComponent(req);
+        final res = await _client.get(Uri.parse(req)).timeout(const Duration(seconds: 15));
+        
+        if (res.statusCode == 200) {
+          final Map<String, dynamic> jsonData = json.decode(res.body);
+          final String csvContent = jsonData['contents'] ?? '';
           
-          // 使用 compute 將龐大的 CSV 資料解析移至背景
-          return await compute(
-            _parseNtpcTrucksIsolate, 
-            _NtpcTruckParseInput(res.body, header)
-          );
+          if (csvContent.isNotEmpty) {
+            final List<List<dynamic>> rows = const CsvToListConverter(shouldParseNumbers: false, eol: '\n').convert(csvContent.trim());
+            if (rows.isNotEmpty) {
+              final header = rows[0].map((e) => e.toString().toLowerCase().trim()).toList();
+              return await compute(_parseNtpcTrucksIsolate, _NtpcTruckParseInput(csvContent, header));
+            }
+          }
+        }
+      } else {
+        // 原本的 Native 請求邏輯
+        final res = await _client.get(Uri.parse(req), headers: _headers).timeout(const Duration(seconds: 10));
+        if (res.statusCode == 200) {
+          final List<List<dynamic>> rows = const CsvToListConverter(shouldParseNumbers: false, eol: '\n').convert(res.body.trim());
+          if (rows.isNotEmpty) {
+            final header = rows[0].map((e) => e.toString().toLowerCase().trim()).toList();
+            return await compute(_parseNtpcTrucksIsolate, _NtpcTruckParseInput(res.body, header));
+          }
         }
       }
     } catch (e) {

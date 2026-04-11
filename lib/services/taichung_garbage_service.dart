@@ -150,11 +150,25 @@ class TaichungGarbageService extends BaseGarbageService {
     try {
       // 抓取即時座標 API (rid=c923...)
       String targetUrl = '$dynamicApiUrl&limit=20000&_t=${DateTime.now().millisecondsSinceEpoch}';
-      if (kIsWeb) targetUrl = 'https://api.allorigins.win/raw?url=' + Uri.encodeComponent(targetUrl);
       
-      final response = await _client.get(Uri.parse(targetUrl)).timeout(const Duration(seconds: 15));
-      if (response.statusCode == 200) {
-        final List<dynamic> data = json.decode(response.body);
+      String body = '';
+      if (kIsWeb) {
+        // [修正]：Web 模式使用 Proxy
+        targetUrl = 'https://api.allorigins.win/get?url=' + Uri.encodeComponent(targetUrl);
+        final response = await _client.get(Uri.parse(targetUrl)).timeout(const Duration(seconds: 15));
+        if (response.statusCode == 200) {
+          final Map<String, dynamic> proxyData = json.decode(response.body);
+          body = proxyData['contents'] ?? '';
+        }
+      } else {
+        final response = await _client.get(Uri.parse(targetUrl)).timeout(const Duration(seconds: 15));
+        if (response.statusCode == 200) {
+          body = response.body;
+        }
+      }
+
+      if (body.isNotEmpty) {
+        final List<dynamic> data = json.decode(body);
         List<GarbageTruck> trucks = [];
 
         for (var item in data) {
