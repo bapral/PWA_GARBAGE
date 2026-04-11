@@ -9,7 +9,7 @@ import 'dart:async';
 import '../models/garbage_truck.dart';
 import '../models/garbage_route_point.dart';
 import 'database_service.dart';
-import 'ntpc_garbage_service.dart';
+import 'base_garbage_service.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 import 'package:flutter/services.dart' show rootBundle;
 import 'package:flutter/foundation.dart';

@@ -11,7 +11,7 @@ import 'package:package_info_plus/package_info_plus.dart';
 import '../models/garbage_truck.dart';
 import '../models/garbage_route_point.dart';
 import 'database_service.dart';
-import 'ntpc_garbage_service.dart';
+import 'base_garbage_service.dart';
 import 'package:flutter/services.dart' show rootBundle;
 
 /// 內部使用的解析封裝物件，用於台北市 Isolate 溝通。

@@ -17,6 +17,7 @@ import 'package:latlong2/latlong.dart';
 import '../models/garbage_truck.dart';
 import '../models/garbage_route_point.dart';
 import '../models/city_config.dart';
+import '../services/base_garbage_service.dart';
 import '../services/ntpc_garbage_service.dart';
 import '../services/taipei_garbage_service.dart';
 import '../services/taichung_garbage_service.dart';

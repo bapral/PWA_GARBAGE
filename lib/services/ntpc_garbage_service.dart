@@ -14,7 +14,7 @@ import 'package:csv/csv.dart';
 import 'package:flutter/services.dart' show rootBundle;
 import 'package:flutter/foundation.dart';
 
-import 'ntpc_garbage_service.dart';
+import 'base_garbage_service.dart';
 
 /// 在獨立 Isolate 中執行的 CSV 解析函式。
 List<GarbageRoutePoint> _parseCsvIsolate(_CsvParseInput input) {
