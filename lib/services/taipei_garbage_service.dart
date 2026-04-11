@@ -3,6 +3,7 @@
 /// 支援串流下載以即時顯示下載進度與筆數。
 
 import 'dart:convert';
+import 'dart:async';
 import 'package:latlong2/latlong.dart';
 import 'package:http/http.dart' as http;
 import 'package:flutter/foundation.dart';
@@ -88,7 +89,18 @@ class TaipeiGarbageService extends BaseGarbageService {
       }
       
       onProgress?.call('正在從雲端獲取最新班表...');
-      final String content = await _downloadWithProgress(onProgress, targetUrl);
+      const int timeoutSeconds = 15;
+      String content;
+      try {
+        content = await _downloadWithProgress(onProgress, targetUrl, timeoutSeconds);
+      } catch (e) {
+        if (e is TimeoutException) {
+          onProgress?.call('連線超過 $timeoutSeconds 秒已 Timeout，改用原內建資料...');
+        } else {
+          onProgress?.call('雲端連線失敗，切換至備援資產...');
+        }
+        content = await rootBundle.loadString('assets/taipei_route.json');
+      }
       
       onProgress?.call('解析數據結構中...');
       final List<GarbageRoutePoint> allPoints = await compute(_parseTaipeiJsonIsolate, _TaipeiParseInput(content));
@@ -104,24 +116,21 @@ class TaipeiGarbageService extends BaseGarbageService {
       }
       throw Exception('無有效數據');
     } catch (e) {
-      DatabaseService.log('台北市同步失敗，切換至備援', error: e);
-      if (await _importFromLocalJson(onProgress)) {
-        await _dbService.updateVersion(currentAppVersion, 'taipei');
-        onProgress?.call('台北市內建資料載入成功。');
-      }
+      DatabaseService.log('台北市同步失敗', error: e);
+      onProgress?.call('台北市資料同步失敗。');
     }
   }
 
-  Future<String> _downloadWithProgress(void Function(String)? onProgress, String url) async {
+  Future<String> _downloadWithProgress(void Function(String)? onProgress, String url, int timeout) async {
     final request = http.Request('GET', Uri.parse(url));
-    final streamedResponse = await _client.send(request).timeout(const Duration(seconds: 20));
+    final streamedResponse = await _client.send(request).timeout(Duration(seconds: timeout));
     if (streamedResponse.statusCode != 200) throw Exception('HTTP Error');
 
     final int totalBytes = streamedResponse.contentLength ?? 0;
     int receivedBytes = 0;
     final List<int> bytes = [];
 
-    await for (var chunk in streamedResponse.stream) {
+    await for (var chunk in streamedResponse.stream.timeout(Duration(seconds: timeout))) {
       bytes.addAll(chunk);
       receivedBytes += chunk.length;
       if (totalBytes > 0) {
@@ -131,20 +140,6 @@ class TaipeiGarbageService extends BaseGarbageService {
       }
     }
     return utf8.decode(bytes);
-  }
-
-  Future<bool> _importFromLocalJson(void Function(String)? onProgress) async {
-    try {
-      final String content = await rootBundle.loadString('assets/taipei_route.json');
-      final List<GarbageRoutePoint> points = _parseTaipeiJsonIsolate(_TaipeiParseInput(content));
-      if (points.isNotEmpty) {
-        await _dbService.clearAndSaveRoutePointsWithProgress(points, 'taipei', (saved, total) {
-          onProgress?.call('載入內建資料: $saved / $total 筆');
-        });
-        return true;
-      }
-    } catch (_) {}
-    return false;
   }
 
   @override

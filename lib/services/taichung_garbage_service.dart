@@ -5,6 +5,7 @@
 import 'package:latlong2/latlong.dart';
 import 'package:http/http.dart' as http;
 import 'dart:convert';
+import 'dart:async';
 import '../models/garbage_truck.dart';
 import '../models/garbage_route_point.dart';
 import 'database_service.dart';
@@ -42,10 +43,9 @@ class TaichungGarbageService extends BaseGarbageService {
       return;
     }
 
-    onProgress?.call('正在初始化台中市資料更新...');
+    onProgress?.call('正在更新台中市資料...');
     
     try {
-      // 步驟一：下載即時座標快照
       onProgress?.call('正在獲取 API 動態快照...');
       String targetDynamicUrl = '$dynamicApiUrl&limit=20000';
       if (kIsWeb) {
@@ -66,15 +66,17 @@ class TaichungGarbageService extends BaseGarbageService {
         }
       }
 
-      // 步驟二：串流下載班表 JSON (如果雲端可用)
-      onProgress?.call('正在從雲端下載班表資產...');
+      onProgress?.call('正在從雲端下載班表...');
       String content;
-      bool apiSuccess = false;
+      const int timeoutSeconds = 20;
       try {
-        content = await _downloadWithProgress(onProgress, routeApiUrl);
-        apiSuccess = true;
+        content = await _downloadWithProgress(onProgress, routeApiUrl, timeoutSeconds);
       } catch (e) {
-        onProgress?.call('雲端下載失敗，切換至內建資產...');
+        if (e is TimeoutException) {
+          onProgress?.call('下載超過 $timeoutSeconds 秒已 Timeout，改用原內建資料...');
+        } else {
+          onProgress?.call('雲端下載失敗，切換至內建資產...');
+        }
         content = await rootBundle.loadString('assets/taichung_route.json');
       }
 
@@ -116,18 +118,18 @@ class TaichungGarbageService extends BaseGarbageService {
       onProgress?.call('台中市同步完成！');
       
     } catch (e) {
-      onProgress?.call('同步失敗: $e');
+      onProgress?.call('同步異常: $e');
     }
   }
 
-  Future<String> _downloadWithProgress(void Function(String)? onProgress, String url) async {
+  Future<String> _downloadWithProgress(void Function(String)? onProgress, String url, int timeout) async {
     String targetUrl = url;
     if (kIsWeb) {
       targetUrl = 'https://api.allorigins.win/raw?url=' + Uri.encodeComponent(url);
     }
     
     final request = http.Request('GET', Uri.parse(targetUrl));
-    final streamedResponse = await _client.send(request).timeout(const Duration(seconds: 20));
+    final streamedResponse = await _client.send(request).timeout(Duration(seconds: timeout));
     
     if (streamedResponse.statusCode != 200) throw Exception('API Error');
 
@@ -135,7 +137,7 @@ class TaichungGarbageService extends BaseGarbageService {
     int receivedBytes = 0;
     final List<int> bytes = [];
 
-    await for (var chunk in streamedResponse.stream) {
+    await for (var chunk in streamedResponse.stream.timeout(Duration(seconds: timeout))) {
       bytes.addAll(chunk);
       receivedBytes += chunk.length;
       if (totalBytes > 0) {
@@ -151,11 +153,11 @@ class TaichungGarbageService extends BaseGarbageService {
   Future<List<GarbageTruck>> fetchTrucks() async {
     try {
       final String timestamp = DateTime.now().millisecondsSinceEpoch.toString();
-      String targetUrl = '$dynamicApiUrl&limit=20000&_t=$timestamp';
+      String requestUrl = '$dynamicApiUrl&limit=20000&_t=$timestamp';
       if (kIsWeb) {
-        targetUrl = 'https://api.allorigins.win/raw?url=' + Uri.encodeComponent(targetUrl);
+        requestUrl = 'https://api.allorigins.win/raw?url=' + Uri.encodeComponent(requestUrl);
       }
-      final response = await _client.get(Uri.parse(targetUrl)).timeout(const Duration(seconds: 8));
+      final response = await _client.get(Uri.parse(requestUrl)).timeout(const Duration(seconds: 8));
       if (response.statusCode == 200) {
         final List<dynamic> results = json.decode(response.body);
         return results.map((item) {
