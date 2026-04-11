@@ -165,6 +165,7 @@ class NtpcGarbageService extends BaseGarbageService {
               carNumber: row[idxCar].toString(), lineId: row[idxLineId].toString(), location: row[idxLoc].toString(),
               position: LatLng(double.tryParse(row[idxLat].toString()) ?? 0, double.tryParse(row[idxLng].toString()) ?? 0),
               updateTime: DateTime.tryParse(row[idxTime].toString()) ?? DateTime.now(),
+              isRealTime: true,
             ));
           }
           return trucks;
@@ -178,7 +179,12 @@ class NtpcGarbageService extends BaseGarbageService {
   Future<List<GarbageTruck>> findTrucksByTime(int hour, int minute) async {
     final points = await _dbService.findPointsByTime(hour, minute, 'ntpc');
     return points.map((p) => GarbageTruck(
-      carNumber: '預定車', lineId: p.lineId, location: p.name, position: p.position, updateTime: DateTime.now(),
+      carNumber: '預定車', 
+      lineId: p.lineId, 
+      location: p.name, 
+      position: p.position, 
+      updateTime: DateTime.now(),
+      isRealTime: false, // 班表預估
     )).toList();
   }
 

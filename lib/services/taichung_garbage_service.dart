@@ -165,21 +165,29 @@ class TaichungGarbageService extends BaseGarbageService {
           final String latStr = item['Y']?.toString() ?? '0';
           final String lonStr = item['X']?.toString() ?? '0';
           return GarbageTruck(
-            carNumber: carNo, lineId: item['lineid']?.toString() ?? '', location: item['location']?.toString() ?? '移動中',
+            carNumber: carNo, lineId: item['lineid']?.toString() ?? '', location: location,
             position: LatLng(double.tryParse(latStr) ?? 0, double.tryParse(lonStr) ?? 0),
             updateTime: DateTime.now(),
+            isRealTime: true,
           );
-        }).toList();
-      }
-    } catch (_) {}
-    return await findTrucksByTime(DateTime.now().hour, DateTime.now().minute);
-  }
+          }).toList();
+          }
+          } catch (_) {}
+          return await findTrucksByTime(DateTime.now().hour, DateTime.now().minute);
+          }
 
-  @override
-  Future<List<GarbageTruck>> findTrucksByTime(int hour, int minute) async {
-    final points = await _dbService.findPointsByTime(hour, minute, 'taichung');
-    return points.map((p) => GarbageTruck(carNumber: '預定車', lineId: p.lineId, location: '${p.lineName} - ${p.name}', position: p.position, updateTime: DateTime.now())).toList();
-  }
+          @override
+          Future<List<GarbageTruck>> findTrucksByTime(int hour, int minute) async {
+          final points = await _dbService.findPointsByTime(hour, minute, 'taichung');
+          return points.map((p) => GarbageTruck(
+          carNumber: '預定車', 
+          lineId: p.lineId, 
+          location: '${p.lineName} - ${p.name}', 
+          position: p.position, 
+          updateTime: DateTime.now(),
+          isRealTime: false,
+          )).toList();
+          }
 
   @override
   Future<List<GarbageRoutePoint>> getRouteForLine(String lineId) async => await _dbService.getRoutePoints(lineId, 'taichung');

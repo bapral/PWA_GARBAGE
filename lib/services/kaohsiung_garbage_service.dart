@@ -189,7 +189,12 @@ class KaohsiungGarbageService extends BaseGarbageService {
   Future<List<GarbageTruck>> findTrucksByTime(int hour, int minute) async {
     final points = await _dbService.findPointsByTime(hour, minute, 'kaohsiung');
     return points.map((p) => GarbageTruck(
-      carNumber: '預定車', lineId: p.lineId, location: p.name, position: p.position, updateTime: DateTime.now(),
+      carNumber: '預定車', 
+      lineId: p.lineId, 
+      location: p.name, 
+      position: p.position, 
+      updateTime: DateTime.now(),
+      isRealTime: false,
     )).toList();
   }
 

@@ -819,7 +819,10 @@ class _MapScreenState extends ConsumerState<MapScreen> {
               const SizedBox(height: 5),
               SelectableText('目前位置描述: ${truck.location}', style: const TextStyle(fontSize: 16)),
               const SizedBox(height: 5),
-              SelectableText('GPS 更新時間: ${truck.updateTime.hour}:${truck.updateTime.minute.toString().padLeft(2, '0')}', style: const TextStyle(color: Colors.grey)),
+              SelectableText(
+                '${truck.isRealTime ? "GPS 更新時間" : "資料庫預定抵達時間"}: ${truck.updateTime.hour}:${truck.updateTime.minute.toString().padLeft(2, '0')}', 
+                style: const TextStyle(color: Colors.grey)
+              ),
               const SizedBox(height: 20),
             ],
           ),

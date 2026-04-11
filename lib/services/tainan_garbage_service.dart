@@ -169,6 +169,7 @@ class TainanGarbageService extends BaseGarbageService {
           location: item['location']?.toString() ?? '行駛中',
           position: LatLng(double.tryParse(item['y']?.toString() ?? '0') ?? 0, double.tryParse(item['x']?.toString() ?? '0') ?? 0),
           updateTime: DateTime.now(),
+          isRealTime: true,
         )).toList();
       }
     } catch (_) {}
@@ -179,7 +180,12 @@ class TainanGarbageService extends BaseGarbageService {
   Future<List<GarbageTruck>> findTrucksByTime(int hour, int minute) async {
     final points = await _dbService.findPointsByTime(hour, minute, 'tainan');
     return points.map((p) => GarbageTruck(
-      carNumber: '預定車', lineId: p.lineId, location: p.name, position: p.position, updateTime: DateTime.now(),
+      carNumber: '預定車', 
+      lineId: p.lineId, 
+      location: p.name, 
+      position: p.position, 
+      updateTime: DateTime.now(),
+      isRealTime: false,
     )).toList();
   }
 
