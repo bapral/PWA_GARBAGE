@@ -106,18 +106,34 @@ class DatabaseService {
   }
 
   Future<void> clearAndSaveRoutePoints(List<GarbageRoutePoint> points, String city) async {
+    await clearAndSaveRoutePointsWithProgress(points, city, null);
+  }
+
+  Future<void> clearAndSaveRoutePointsWithProgress(
+    List<GarbageRoutePoint> points, 
+    String city, 
+    void Function(int saved, int total)? onProgress
+  ) async {
     final database = await db;
     await database.transaction((txn) async {
       await txn.delete(tableName, where: 'city = ?', whereArgs: [city]);
-      final batch = txn.batch();
-      for (var p in points) {
-        batch.insert(tableName, {
-          'lineId': p.lineId, 'lineName': p.lineName, 'rank': p.rank, 'name': p.name,
-          'latitude': p.position.latitude, 'longitude': p.position.longitude, 'arrivalTime': p.arrivalTime,
-          'city': city,
-        });
+      
+      const int batchSize = 1000;
+      for (int i = 0; i < points.length; i += batchSize) {
+        final batch = txn.batch();
+        int end = (i + batchSize < points.length) ? i + batchSize : points.length;
+        
+        for (var j = i; j < end; j++) {
+          final p = points[j];
+          batch.insert(tableName, {
+            'lineId': p.lineId, 'lineName': p.lineName, 'rank': p.rank, 'name': p.name,
+            'latitude': p.position.latitude, 'longitude': p.position.longitude, 'arrivalTime': p.arrivalTime,
+            'city': city,
+          });
+        }
+        await batch.commit(noResult: true);
+        onProgress?.call(end, points.length);
       }
-      await batch.commit(noResult: true);
     });
   }
 

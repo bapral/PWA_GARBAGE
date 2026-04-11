@@ -1,13 +1,6 @@
 /// [整體程式說明]
-/// 本文件定義了垃圾清運服務的基底架構以及新北市（NTPC）的具體實作。
-/// [BaseGarbageService] 確立了城市服務的統一介面，支援多城市擴充。
-/// [NtpcGarbageService] 則實作了新北市開放資料的 CSV 解析邏輯，
-/// 包含即時動態 API、路線班表 API 以及本地 CSV 備援方案。
-///
-/// [執行順序說明]
-/// 1. 呼叫 `syncDataIfNeeded`：比對版本後，優先從雲端 API 下載 CSV 路線資料。
-/// 2. 若 API 逾時或失敗，則嘗試讀取本地 Assets 中的 CSV 檔案進行匯入。
-/// 3. 解析過程中使用 `CsvToListConverter` 將字串轉換為 `GarbageRoutePoint` 並批次存入資料庫。
+/// 本文件定義了新北市（NTPC）的垃圾清運服務實作。
+/// 支援串流下載（Streamed Download）以即時顯示下載進度與筆數。
 
 import 'dart:convert';
 import 'dart:math';
@@ -21,60 +14,7 @@ import 'package:csv/csv.dart';
 import 'package:flutter/services.dart' show rootBundle;
 import 'package:flutter/foundation.dart';
 
-/// [BaseGarbageService] 是所有城市垃圾清運服務的基底抽象類別。
-abstract class BaseGarbageService {
-  final String localSourceDir; 
-  BaseGarbageService({required this.localSourceDir});
-  Future<void> syncDataIfNeeded({void Function(String)? onProgress});
-  Future<List<GarbageTruck>> fetchTrucks();
-  Future<List<GarbageTruck>> findTrucksByTime(int hour, int minute);
-  Future<List<GarbageRoutePoint>> getRouteForLine(String lineId);
-  void dispose();
-}
-
-/// 內部使用的解析封裝物件，用於 Isolate 溝通。
-class _CsvParseInput {
-  final String csvBody;
-  const _CsvParseInput(this.csvBody);
-}
-
-/// 在獨立 Isolate 中執行的 CSV 解析函式。
-List<GarbageRoutePoint> _parseCsvIsolate(_CsvParseInput input) {
-  final List<List<dynamic>> fields = const CsvToListConverter(
-    shouldParseNumbers: false, 
-    eol: '\n'
-  ).convert(input.csvBody);
-
-  if (fields.length <= 1) return [];
-
-  final header = fields[0].map((e) => e.toString().toLowerCase().trim()).toList();
-  int idxLineId = header.indexOf('lineid');
-  int idxLat = header.indexOf('latitude');
-  int idxLng = header.indexOf('longitude');
-  int idxTime = header.indexOf('time');
-  int idxLineName = header.indexOf('linename');
-  int idxName = header.indexOf('name');
-  int idxRank = header.indexOf('rank');
-
-  List<GarbageRoutePoint> result = [];
-  for (int i = 1; i < fields.length; i++) {
-    final row = fields[i];
-    if (row.length < 4) continue;
-
-    result.add(GarbageRoutePoint(
-      lineId: row[idxLineId].toString(),
-      lineName: idxLineName != -1 ? row[idxLineName].toString() : '',
-      rank: idxRank != -1 ? (int.tryParse(row[idxRank].toString()) ?? 0) : i,
-      name: idxName != -1 ? row[idxName].toString() : '',
-      position: LatLng(
-        double.tryParse(row[idxLat].toString()) ?? 0, 
-        double.tryParse(row[idxLng].toString()) ?? 0
-      ),
-      arrivalTime: row[idxTime].toString(),
-    ));
-  }
-  return result;
-}
+import 'ntpc_garbage_service.dart';
 
 class NtpcGarbageService extends BaseGarbageService {
   static const String apiUrl = 'https://data.ntpc.gov.tw/api/datasets/28ab4122-60e1-4065-98e5-abccb69aaca6/csv';
@@ -111,84 +51,95 @@ class NtpcGarbageService extends BaseGarbageService {
       return;
     }
 
-    onProgress?.call('正在更新新北市路線資料...');
+    onProgress?.call('正在初始化新北市資料同步...');
     
-    // 優先嘗試 API，但加入嚴格的逾時保護 (10秒)
     bool apiSuccess = false;
     try {
       String targetUrl = routeUrl + '?size=100000';
       if (kIsWeb) {
         targetUrl = 'https://api.allorigins.win/raw?url=' + Uri.encodeComponent(targetUrl);
       }
-      apiSuccess = await _syncFromApi(onProgress, customUrl: targetUrl);
+      apiSuccess = await _syncFromApiWithProgress(onProgress, customUrl: targetUrl);
     } catch (e) {
-      DatabaseService.log('新北市 API 連線失敗或逾時，轉向本地資產: $e');
+      DatabaseService.log('新北市 API 失敗，切換至備援: $e');
     }
 
     if (apiSuccess) {
       await _dbService.updateVersion(currentAppVersion, 'ntpc');
-      onProgress?.call('新北市路線同步完成 (雲端)。');
+      onProgress?.call('新北市雲端同步成功！');
     } else {
-      onProgress?.call('正在載入內建清運班表資料 (Assets)...');
+      onProgress?.call('雲端連線不佳，改由內建資產載入...');
       if (await _importFromLocalCSV(onProgress)) {
         await _dbService.updateVersion(currentAppVersion, 'ntpc');
-        onProgress?.call('新北市路線載入完成。');
-      } else {
-        onProgress?.call('載入失敗，地圖可能不顯示完整路線。');
+        onProgress?.call('新北市內建資料載入成功。');
       }
     }
   }
 
-  Future<bool> _syncFromApi(void Function(String)? onProgress, {required String customUrl}) async {
+  /// 使用串流方式下載資料，以便回報進度。
+  Future<bool> _syncFromApiWithProgress(void Function(String)? onProgress, {required String customUrl}) async {
     try {
-      onProgress?.call('連線至政府 API...');
-      final response = await _client.get(Uri.parse(customUrl), headers: _headers)
-          .timeout(const Duration(seconds: 12)); // 設定 12 秒逾時
+      onProgress?.call('正在建立連線...');
+      final request = http.Request('GET', Uri.parse(customUrl));
+      _headers.forEach((k, v) => request.headers[k] = v);
       
-      if (response.statusCode == 200) {
-        onProgress?.call('獲取成功，解析中...');
-        final List<GarbageRoutePoint> allPoints = await compute(_parseCsvIsolate, _CsvParseInput(response.body.trim()));
+      final streamedResponse = await _client.send(request).timeout(const Duration(seconds: 15));
+      
+      if (streamedResponse.statusCode != 200) return false;
 
-        if (allPoints.isNotEmpty) {
-          await _dbService.clearAllRoutePoints('ntpc');
-          const int batchSize = 1000; // 降低批次大小以利 Web 穩定性
-          for (int i = 0; i < allPoints.length; i += batchSize) {
-            int end = (i + batchSize < allPoints.length) ? i + batchSize : allPoints.length;
-            await _dbService.saveRoutePoints(allPoints.sublist(i, end), 'ntpc');
-            onProgress?.call('資料儲存中: ${((end/allPoints.length)*100).toInt()}%');
-          }
-          return true;
+      final int totalBytes = streamedResponse.contentLength ?? 0;
+      int receivedBytes = 0;
+      final List<int> bytes = [];
+
+      // 監聽下載串流
+      await for (var chunk in streamedResponse.stream) {
+        bytes.addAll(chunk);
+        receivedBytes += chunk.length;
+        if (totalBytes > 0) {
+          onProgress?.call('下載中: ${(receivedBytes / 1024).toStringAsFixed(1)} KB / ${(totalBytes / 1024).toStringAsFixed(1)} KB');
+        } else {
+          onProgress?.call('下載中: ${(receivedBytes / 1024).toStringAsFixed(1)} KB');
         }
       }
+
+      onProgress?.call('下載完成，正在解析數據結構...');
+      final String body = utf8.decode(bytes);
+      final List<GarbageRoutePoint> allPoints = _parseCsvIsolate(_CsvParseInput(body.trim()));
+
+      if (allPoints.isNotEmpty) {
+        await _dbService.clearAllRoutePoints('ntpc');
+        const int batchSize = 1000;
+        for (int i = 0; i < allPoints.length; i += batchSize) {
+          int end = (i + batchSize < allPoints.length) ? i + batchSize : allPoints.length;
+          await _dbService.saveRoutePoints(allPoints.sublist(i, end), 'ntpc');
+          onProgress?.call('儲存資料庫: $end / ${allPoints.length} 筆');
+        }
+        return true;
+      }
     } catch (e) {
-      DatabaseService.log('新北市 API 同步異常', error: e);
+      DatabaseService.log('Ntpc API Progress Sync Error', error: e);
     }
     return false;
   }
 
   Future<bool> _importFromLocalCSV(void Function(String)? onProgress) async {
     try {
-      String csvContent;
-      try {
-        csvContent = await rootBundle.loadString('assets/ntpc_route.csv');
-      } catch (e) {
-        return false;
-      }
-
+      onProgress?.call('讀取內部資源中...');
+      final String csvContent = await rootBundle.loadString('assets/ntpc_route.csv');
       final List<GarbageRoutePoint> allPoints = _parseCsvIsolate(_CsvParseInput(csvContent));
-      if (allPoints.isEmpty) return false;
-
-      await _dbService.clearAllRoutePoints('ntpc');
-      const int batchSize = 1000;
-      for (int i = 0; i < allPoints.length; i += batchSize) {
-        int end = (i + batchSize < allPoints.length) ? i + batchSize : allPoints.length;
-        await _dbService.saveRoutePoints(allPoints.sublist(i, end), 'ntpc');
-        onProgress?.call('正在載入本地資料: ${((end/allPoints.length)*100).toInt()}%');
+      
+      if (allPoints.isNotEmpty) {
+        await _dbService.clearAllRoutePoints('ntpc');
+        const int batchSize = 1000;
+        for (int i = 0; i < allPoints.length; i += batchSize) {
+          int end = (i + batchSize < allPoints.length) ? i + batchSize : allPoints.length;
+          await _dbService.saveRoutePoints(allPoints.sublist(i, end), 'ntpc');
+          onProgress?.call('載入內部資料: $end / ${allPoints.length} 筆');
+        }
+        return true;
       }
-      return true;
-    } catch (e) {
-      return false;
-    }
+    } catch (_) {}
+    return false;
   }
 
   @override
@@ -199,7 +150,7 @@ class NtpcGarbageService extends BaseGarbageService {
       if (kIsWeb) {
         requestUrl = 'https://api.allorigins.win/raw?url=' + Uri.encodeComponent(requestUrl);
       }
-      final response = await _client.get(Uri.parse(requestUrl), headers: _headers).timeout(const Duration(seconds: 8));
+      final response = await _client.get(Uri.parse(requestUrl), headers: _headers).timeout(const Duration(seconds: 10));
       if (response.statusCode == 200) {
         final List<List<dynamic>> rows = const CsvToListConverter(shouldParseNumbers: false, eol: '\n').convert(response.body.trim());
         if (rows.length > 1) {

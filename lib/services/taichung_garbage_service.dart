@@ -1,6 +1,6 @@
 /// [整體程式說明]
-/// 本文件定義了 [TaichungGarbageService] 類別，專門處理台中市的垃圾清運資料。
-/// 支援從 API 抓取最新動態並與本地 JSON 班表關聯。
+/// 本文件定義了台中市（Taichung）的垃圾清運服務實作。
+/// 支援串流下載以顯示下載進度，並提供明確的資料庫儲存筆數回報。
 
 import 'package:latlong2/latlong.dart';
 import 'package:http/http.dart' as http;
@@ -38,23 +38,21 @@ class TaichungGarbageService extends BaseGarbageService {
 
     final String? storedVersion = await _dbService.getStoredVersion('taichung');
     if (storedVersion == currentAppVersion && (await _dbService.hasData('taichung'))) {
-      onProgress?.call('台中市班表已就緒...');
+      onProgress?.call('台中市資料已就緒...');
       return;
     }
 
-    onProgress?.call('正在更新台中市資料...');
+    onProgress?.call('正在初始化台中市資料更新...');
     
     try {
-      // 步驟一：下載即時座標快照 (加入逾時)
-      onProgress?.call('連線至 API...');
+      // 步驟一：下載即時座標快照
+      onProgress?.call('正在獲取 API 動態快照...');
       String targetDynamicUrl = '$dynamicApiUrl&limit=20000';
       if (kIsWeb) {
         targetDynamicUrl = 'https://api.allorigins.win/raw?url=' + Uri.encodeComponent(targetDynamicUrl);
       }
       
-      final dynamicResponse = await _client.get(Uri.parse(targetDynamicUrl))
-          .timeout(const Duration(seconds: 10));
-      
+      final dynamicResponse = await _client.get(Uri.parse(targetDynamicUrl)).timeout(const Duration(seconds: 10));
       Map<String, LatLng> carPositions = {};
       if (dynamicResponse.statusCode == 200) {
         final List<dynamic> dynamicData = json.decode(dynamicResponse.body);
@@ -68,17 +66,20 @@ class TaichungGarbageService extends BaseGarbageService {
         }
       }
 
-      // 步驟二：讀取 Assets (台中 JSON 很大，直接從 Assets 讀取最穩)
-      onProgress?.call('載入內建班表資料 (Assets)...');
+      // 步驟二：串流下載班表 JSON (如果雲端可用)
+      onProgress?.call('正在從雲端下載班表資產...');
       String content;
+      bool apiSuccess = false;
       try {
-        content = await rootBundle.loadString('assets/taichung_route.json');
+        content = await _downloadWithProgress(onProgress, routeApiUrl);
+        apiSuccess = true;
       } catch (e) {
-        throw Exception('無法載入資產檔');
+        onProgress?.call('雲端下載失敗，切換至內建資產...');
+        content = await rootBundle.loadString('assets/taichung_route.json');
       }
 
+      onProgress?.call('解析數據結構中...');
       final List<dynamic> scheduleData = json.decode(content);
-      onProgress?.call('正在解析班表...');
       
       List<GarbageRoutePoint> allPoints = [];
       int dayOfWeek = DateTime.now().weekday;
@@ -106,14 +107,44 @@ class TaichungGarbageService extends BaseGarbageService {
         ));
       }
       
-      await _dbService.clearAndSaveRoutePoints(allPoints, 'taichung');
+      onProgress?.call('正在儲存至資料庫...');
+      await _dbService.clearAndSaveRoutePointsWithProgress(allPoints, 'taichung', (saved, total) {
+        onProgress?.call('資料庫寫入中: $saved / $total 筆');
+      });
+      
       await _dbService.updateVersion(currentAppVersion, 'taichung');
       onProgress?.call('台中市同步完成！');
       
     } catch (e) {
-      DatabaseService.log('台中市同步失敗', error: e);
-      onProgress?.call('同步失敗，地圖可能不顯示完整路線。');
+      onProgress?.call('同步失敗: $e');
     }
+  }
+
+  Future<String> _downloadWithProgress(void Function(String)? onProgress, String url) async {
+    String targetUrl = url;
+    if (kIsWeb) {
+      targetUrl = 'https://api.allorigins.win/raw?url=' + Uri.encodeComponent(url);
+    }
+    
+    final request = http.Request('GET', Uri.parse(targetUrl));
+    final streamedResponse = await _client.send(request).timeout(const Duration(seconds: 20));
+    
+    if (streamedResponse.statusCode != 200) throw Exception('API Error');
+
+    final int totalBytes = streamedResponse.contentLength ?? 0;
+    int receivedBytes = 0;
+    final List<int> bytes = [];
+
+    await for (var chunk in streamedResponse.stream) {
+      bytes.addAll(chunk);
+      receivedBytes += chunk.length;
+      if (totalBytes > 0) {
+        onProgress?.call('下載中: ${(receivedBytes / 1024).toStringAsFixed(1)} KB / ${(totalBytes / 1024).toStringAsFixed(1)} KB');
+      } else {
+        onProgress?.call('下載中: ${(receivedBytes / 1024).toStringAsFixed(1)} KB');
+      }
+    }
+    return utf8.decode(bytes);
   }
 
   @override
