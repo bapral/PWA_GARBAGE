@@ -171,36 +171,24 @@ class TaipeiGarbageService extends BaseGarbageService {
   @override
   Future<List<GarbageTruck>> fetchTrucks() async {
     try {
-      // 根據 REALTIME_GARBAGE_API_GUIDE.md，台北市即時與班表整合在同一 API
-      // 必須加上 limit=20000 以取得全量資料
-      String targetUrl = '$routeUrl&limit=20000';
+      // 縮減 Web 端請求數量以確保代理伺服器傳輸穩定
+      int limit = kIsWeb ? 5000 : 20000;
+      String targetUrl = '$routeUrl&limit=$limit';
       
+      String? body;
       if (kIsWeb) {
-        // [修正]：處理 PWA 模式下的代理響應格式
-        targetUrl = 'https://api.allorigins.win/get?url=' + Uri.encodeComponent(targetUrl);
-        final response = await _client.get(Uri.parse(targetUrl)).timeout(const Duration(seconds: 15));
-        
-        if (response.statusCode == 200) {
-          final Map<String, dynamic> proxyData = json.decode(response.body);
-          final String realBody = proxyData['contents'] ?? '';
-          
-          if (realBody.isNotEmpty) {
-            final List<GarbageTruck> allTrucks = await compute(
-              _parseTaipeiTrucksIsolate, 
-              _TaipeiTruckParseInput(realBody)
-            );
-            if (allTrucks.isNotEmpty) return allTrucks;
-          }
-        }
+        body = await webFetch(_client, targetUrl, timeout: 20);
       } else {
         final response = await _client.get(Uri.parse(targetUrl)).timeout(const Duration(seconds: 15));
-        if (response.statusCode == 200) {
-          final List<GarbageTruck> allTrucks = await compute(
-            _parseTaipeiTrucksIsolate, 
-            _TaipeiTruckParseInput(response.body)
-          );
-          if (allTrucks.isNotEmpty) return allTrucks;
-        }
+        if (response.statusCode == 200) body = response.body;
+      }
+
+      if (body != null && body.isNotEmpty) {
+        final List<GarbageTruck> allTrucks = await compute(
+          _parseTaipeiTrucksIsolate, 
+          _TaipeiTruckParseInput(body)
+        );
+        if (allTrucks.isNotEmpty) return allTrucks;
       }
     } catch (e) {
       DatabaseService.log('Taipei Realtime Fetch Failed', error: e);

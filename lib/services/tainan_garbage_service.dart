@@ -117,23 +117,15 @@ class TainanGarbageService extends BaseGarbageService {
     try {
       String targetUrl = dynamicApiUrl;
       
-      String body = '';
+      String? body;
       if (kIsWeb) {
-        // [修正]：Web 模式使用 Proxy /get 端點
-        targetUrl = 'https://api.allorigins.win/get?url=' + Uri.encodeComponent(targetUrl);
-        final response = await _client.get(Uri.parse(targetUrl)).timeout(const Duration(seconds: 15));
-        if (response.statusCode == 200) {
-          final Map<String, dynamic> proxyData = json.decode(response.body);
-          body = proxyData['contents'] ?? '';
-        }
+        body = await webFetch(_client, targetUrl, timeout: 15);
       } else {
         final response = await _client.get(Uri.parse(targetUrl)).timeout(const Duration(seconds: 10));
-        if (response.statusCode == 200) {
-          body = utf8.decode(response.bodyBytes);
-        }
+        if (response.statusCode == 200) body = utf8.decode(response.bodyBytes);
       }
 
-      if (body.isNotEmpty) {
+      if (body != null && body.isNotEmpty) {
         final Map<String, dynamic> data = json.decode(body);
         final List<dynamic> records = data['data'] ?? [];
         return records.map((item) => GarbageTruck(

@@ -1,28 +1,57 @@
+import 'package:http/http.dart' as http;
+import 'dart:convert';
+import 'dart:async';
+import 'package:flutter/foundation.dart';
 import '../models/garbage_truck.dart';
 import '../models/garbage_route_point.dart';
 
-/// [BaseGarbageService] 是所有城市垃圾清運服務的基底抽象類別。
+/// 垃圾清運服務基底類別。
 abstract class BaseGarbageService {
-  /// 存放該城市本地資源檔案（如預載 CSV/JSON）的目錄路徑。
-  final String localSourceDir; 
-  
-  /// 建構子：初始化服務基類。
+  final String localSourceDir;
   BaseGarbageService({required this.localSourceDir});
 
-  /// 檢查版本並同步資料。
-  /// [force] 若為 true，代表是由使用者點擊「強制更新」按鈕觸發，應連線 API。
-  /// [onProgress] 同步進度回調。
+  /// 釋放資源 (如 http.Client)。
+  void dispose();
+
+  /// 同步班表資料至資料庫。
   Future<void> syncDataIfNeeded({bool force = false, void Function(String)? onProgress});
 
-  /// 獲取該城市目前的垃圾車即時動態。
+  /// 獲取即時垃圾車動態。
   Future<List<GarbageTruck>> fetchTrucks();
 
-  /// 根據指定的時間點，從資料庫中檢索預計出現的垃圾車。
+  /// 根據時間查找班表點位。
   Future<List<GarbageTruck>> findTrucksByTime(int hour, int minute);
 
-  /// 獲取特定路線編號的完整點位序列。
+  /// 獲取特定路線的所有點位。
   Future<List<GarbageRoutePoint>> getRouteForLine(String lineId);
 
-  /// 釋放資源。
-  void dispose();
+  /// [Web 專用] 具備備援機制的 Web 抓取工具。
+  Future<String?> webFetch(http.Client client, String url, {int timeout = 15}) async {
+    if (!kIsWeb) return null;
+
+    // 代理伺服器清單 (由穩定到備援)
+    final proxies = [
+      (String u) => 'https://corsproxy.io/?' + Uri.encodeComponent(u),
+      (String u) => 'https://api.allorigins.win/get?url=' + Uri.encodeComponent(u),
+      (String u) => 'https://api.codetabs.com/v1/proxy?url=' + Uri.encodeComponent(u),
+    ];
+
+    for (var proxyFunc in proxies) {
+      try {
+        final target = proxyFunc(url);
+        final res = await client.get(Uri.parse(target)).timeout(Duration(seconds: timeout));
+        
+        if (res.statusCode == 200) {
+          if (target.contains('allorigins.win')) {
+            final Map<String, dynamic> data = json.decode(res.body);
+            return data['contents'];
+          }
+          return res.body;
+        }
+      } catch (e) {
+        debugPrint('Proxy Attempt Failed: $e');
+      }
+    }
+    return null;
+  }
 }

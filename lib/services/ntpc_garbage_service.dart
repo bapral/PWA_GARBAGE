@@ -159,34 +159,20 @@ class NtpcGarbageService extends BaseGarbageService {
   @override
   Future<List<GarbageTruck>> fetchTrucks() async {
     try {
-      // 改用 JSON 格式以提升 PWA 解析相容性
+      // 縮減 Web 端的資料量至 5000 筆，以提升代理伺服器的傳輸成功率
+      int size = kIsWeb ? 5000 : 20000;
       String baseApiUrl = 'https://data.ntpc.gov.tw/api/datasets/28ab4122-60e1-4065-98e5-abccb69aaca6/json';
-      String req = '$baseApiUrl?size=20000&_t=${DateTime.now().millisecondsSinceEpoch}';
+      String req = '$baseApiUrl?size=$size&_t=${DateTime.now().millisecondsSinceEpoch}';
       
-      String body = '';
+      String? body;
       if (kIsWeb) {
-        // [策略]：優先使用 corsproxy.io (速度快且支援大數據)，失敗則嘗試 allorigins
-        try {
-          final webUrl = 'https://corsproxy.io/?' + Uri.encodeComponent(req);
-          final res = await _client.get(Uri.parse(webUrl)).timeout(const Duration(seconds: 12));
-          if (res.statusCode == 200) {
-            body = res.body;
-          }
-        } catch (_) {
-          // 備援方案
-          final backupUrl = 'https://api.allorigins.win/get?url=' + Uri.encodeComponent(req);
-          final res = await _client.get(Uri.parse(backupUrl)).timeout(const Duration(seconds: 15));
-          if (res.statusCode == 200) {
-            body = json.decode(res.body)['contents'] ?? '';
-          }
-        }
+        body = await webFetch(_client, req, timeout: 20);
       } else {
-        // Native 模式維持原樣
-        final res = await _client.get(Uri.parse(req), headers: _headers).timeout(const Duration(seconds: 10));
+        final res = await _client.get(Uri.parse(req), headers: _headers).timeout(const Duration(seconds: 15));
         if (res.statusCode == 200) body = res.body;
       }
 
-      if (body.isNotEmpty) {
+      if (body != null && body.isNotEmpty) {
         final List<dynamic> data = json.decode(body);
         List<GarbageTruck> trucks = [];
         for (var item in data) {
