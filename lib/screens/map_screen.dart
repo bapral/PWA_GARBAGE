@@ -401,77 +401,94 @@ class _MapScreenState extends ConsumerState<MapScreen> {
                 ),
                 // 垃圾車標記圖層
                 MarkerLayer(
-                  markers: trucks.asMap().entries.map((entry) {
-                    final index = entry.key;
-                    final truck = entry.value;
-                    // 使用 索引 + 車號 + 座標 的組合鍵，確保全域唯一性，避免 Duplicate Key 錯誤
-                    final key = ValueKey('truck_${truck.carNumber}_${truck.position.latitude}_${truck.position.longitude}_$index');
-                    
-                    Color cityColor;
-                    String cityShort;
-                    
-                    if (truck.lineId.contains('台北') || config.cityName == 'taipei') {
-                      cityColor = Colors.blue[700]!;
-                      cityShort = '北';
-                    } else if (truck.lineId.contains('台中') || config.cityName == 'taichung') {
-                      cityColor = Colors.green[700]!;
-                      cityShort = '中';
-                    } else if (truck.lineId.contains('新北') || config.cityName == 'ntpc') {
-                      cityColor = Colors.orange[800]!;
-                      cityShort = '新';
-                    } else if (truck.lineId.contains('台南') || config.cityName == 'tainan') {
-                      cityColor = Colors.deepOrange[700]!;
-                      cityShort = '南';
-                    } else if (truck.lineId.contains('高雄') || config.cityName == 'kaohsiung') {
-                      cityColor = Colors.purple[700]!;
-                      cityShort = '高';
-                    } else {
-                      cityColor = Colors.grey[700]!;
-                      cityShort = '?';
-                    }
-                    
-                    return Marker(
-                      key: key,
-                      point: truck.position,
-                      width: 50,
-                      height: 50,
-                      child: GestureDetector(
-                        onTap: () {
-                          DatabaseService.log('選取車輛標記: ${truck.carNumber}');
-                          _showTruckInfo(truck);
-                        },
-                        child: Stack(
-                          alignment: Alignment.center,
-                          children: [
-                            // 簡化後的標記背景，減少陰影計算以提升 FPS
-                            Container(
-                              width: 38,
-                              height: 38,
-                              decoration: BoxDecoration(
-                                color: Colors.white,
-                                shape: BoxShape.circle,
-                                border: Border.all(color: cityColor, width: 2),
-                              ),
-                            ),
-                            Icon(Icons.local_shipping_rounded, color: cityColor, size: 22),
-                            Positioned(
-                              top: 0,
-                              right: 0,
-                              child: Container(
-                                padding: const EdgeInsets.all(2),
+                  markers: () {
+                    final Map<String, int> overlapCount = {};
+                    return trucks.asMap().entries.map((entry) {
+                      final index = entry.key;
+                      final truck = entry.value;
+                      
+                      // 處理座標重疊：若座標完全相同，加上微小偏移使其散開
+                      final posKey = '${truck.position.latitude}_${truck.position.longitude}';
+                      final count = overlapCount[posKey] ?? 0;
+                      overlapCount[posKey] = count + 1;
+                      
+                      LatLng finalPos = truck.position;
+                      if (count > 0) {
+                        // 每多一台重疊，就往外偏移約 10~20 公尺
+                        final double offset = 0.0001 * count;
+                        finalPos = LatLng(
+                          truck.position.latitude + (offset * (index % 2 == 0 ? 1 : -1)),
+                          truck.position.longitude + (offset * (index % 3 == 0 ? 1 : -1)),
+                        );
+                      }
+
+                      final key = ValueKey('truck_${truck.carNumber}_${finalPos.latitude}_${finalPos.longitude}_$index');
+                      
+                      Color cityColor;
+                      String cityShort;
+                      
+                      if (truck.lineId.contains('台北') || config.cityName == 'taipei') {
+                        cityColor = Colors.blue[700]!;
+                        cityShort = '北';
+                      } else if (truck.lineId.contains('台中') || config.cityName == 'taichung') {
+                        cityColor = Colors.green[700]!;
+                        cityShort = '中';
+                      } else if (truck.lineId.contains('新北') || config.cityName == 'ntpc') {
+                        cityColor = Colors.orange[800]!;
+                        cityShort = '新';
+                      } else if (truck.lineId.contains('台南') || config.cityName == 'tainan') {
+                        cityColor = Colors.deepOrange[700]!;
+                        cityShort = '南';
+                      } else if (truck.lineId.contains('高雄') || config.cityName == 'kaohsiung') {
+                        cityColor = Colors.purple[700]!;
+                        cityShort = '高';
+                      } else {
+                        cityColor = Colors.grey[700]!;
+                        cityShort = '?';
+                      }
+                      
+                      return Marker(
+                        key: key,
+                        point: finalPos,
+                        width: 50,
+                        height: 50,
+                        child: GestureDetector(
+                          onTap: () {
+                            DatabaseService.log('選取車輛標記: ${truck.carNumber}');
+                            _showTruckInfo(truck);
+                          },
+                          child: Stack(
+                            alignment: Alignment.center,
+                            children: [
+                              Container(
+                                width: 38,
+                                height: 38,
                                 decoration: BoxDecoration(
-                                  color: cityColor,
+                                  color: Colors.white,
                                   shape: BoxShape.circle,
-                                  border: Border.all(color: Colors.white, width: 1),
+                                  border: Border.all(color: cityColor, width: 2),
                                 ),
-                                child: Text(cityShort, style: const TextStyle(color: Colors.white, fontSize: 7, fontWeight: FontWeight.bold)),
                               ),
-                            ),
-                          ],
+                              Icon(Icons.local_shipping_rounded, color: cityColor, size: 22),
+                              Positioned(
+                                top: 0,
+                                right: 0,
+                                child: Container(
+                                  padding: const EdgeInsets.all(2),
+                                  decoration: BoxDecoration(
+                                    color: cityColor,
+                                    shape: BoxShape.circle,
+                                    border: Border.all(color: Colors.white, width: 1),
+                                  ),
+                                  child: Text(cityShort, style: const TextStyle(color: Colors.white, fontSize: 7, fontWeight: FontWeight.bold)),
+                                ),
+                              ),
+                            ],
+                          ),
                         ),
-                      ),
-                    );
-                  }).toList(),
+                      );
+                    }).toList();
+                  }(),
                 ),
                 // 使用者所在位置標記
                 if (locationMode == LocationMode.manual && manualPos != null)
