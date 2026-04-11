@@ -158,8 +158,12 @@ class DatabaseService {
       // 雙北地區：範圍較精確，目前時間 -5 分鐘 到 +10 分鐘
       beforeOffset = -5;
       afterOffset = 10;
+    } else if (city == 'taichung') {
+      // 台中地區：預測目標時間的前後 15 分鐘
+      beforeOffset = -15;
+      afterOffset = 15;
     } else {
-      // 其他地區（台中、台南、高雄）：範圍稍寬，目前時間 -10 分鐘 到 +15 分鐘
+      // 其他地區（台南、高雄）：範圍目前時間 -10 分鐘 到 +15 分鐘
       beforeOffset = -10;
       afterOffset = 15;
     }
