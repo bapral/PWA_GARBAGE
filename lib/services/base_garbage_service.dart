@@ -4,52 +4,46 @@ import 'dart:async';
 import 'package:flutter/foundation.dart';
 import '../models/garbage_truck.dart';
 import '../models/garbage_route_point.dart';
+import 'database_service.dart';
 
 /// 垃圾清運服務基底類別。
 abstract class BaseGarbageService {
   final String localSourceDir;
   BaseGarbageService({required this.localSourceDir});
 
-  /// 釋放資源 (如 http.Client)。
   void dispose();
-
-  /// 同步班表資料至資料庫。
   Future<void> syncDataIfNeeded({bool force = false, void Function(String)? onProgress});
-
-  /// 獲取即時垃圾車動態。
   Future<List<GarbageTruck>> fetchTrucks();
-
-  /// 根據時間查找班表點位。
   Future<List<GarbageTruck>> findTrucksByTime(int hour, int minute);
-
-  /// 獲取特定路線的所有點位。
   Future<List<GarbageRoutePoint>> getRouteForLine(String lineId);
 
-  /// [Web 專用] 具備備援機制的 Web 抓取工具。
+  /// [Web 專用] 高可用性抓取工具：嘗試直接連線與多重代理
   Future<String?> webFetch(http.Client client, String url, {int timeout = 15}) async {
     if (!kIsWeb) return null;
 
-    // 代理伺服器清單 (由穩定到備援)
-    final proxies = [
-      (String u) => 'https://corsproxy.io/?' + Uri.encodeComponent(u),
-      (String u) => 'https://api.allorigins.win/get?url=' + Uri.encodeComponent(u),
-      (String u) => 'https://api.codetabs.com/v1/proxy?url=' + Uri.encodeComponent(u),
+    // 1. 嘗試直接連線 (預防某些 API 已開啟 CORS)
+    try {
+      final res = await client.get(Uri.parse(url)).timeout(const Duration(seconds: 5));
+      if (res.statusCode == 200) return res.body;
+    } catch (_) {}
+
+    // 2. 代理伺服器輪詢清單 (使用 raw 模式以簡化解析)
+    final proxyUrls = [
+      'https://corsproxy.io/?' + Uri.encodeComponent(url),
+      'https://api.allorigins.win/raw?url=' + Uri.encodeComponent(url),
+      'https://thingproxy.freeboard.io/fetch/' + url,
     ];
 
-    for (var proxyFunc in proxies) {
+    for (var target in proxyUrls) {
       try {
-        final target = proxyFunc(url);
+        DatabaseService.log('嘗試代理連線: $target');
         final res = await client.get(Uri.parse(target)).timeout(Duration(seconds: timeout));
-        
-        if (res.statusCode == 200) {
-          if (target.contains('allorigins.win')) {
-            final Map<String, dynamic> data = json.decode(res.body);
-            return data['contents'];
-          }
+        if (res.statusCode == 200 && res.body.isNotEmpty) {
+          DatabaseService.log('代理連線成功！');
           return res.body;
         }
       } catch (e) {
-        debugPrint('Proxy Attempt Failed: $e');
+        DatabaseService.log('代理失敗 ($target): $e');
       }
     }
     return null;

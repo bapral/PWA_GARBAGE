@@ -171,8 +171,8 @@ class TaipeiGarbageService extends BaseGarbageService {
   @override
   Future<List<GarbageTruck>> fetchTrucks() async {
     try {
-      // 縮減 Web 端請求數量以確保代理伺服器傳輸穩定
-      int limit = kIsWeb ? 5000 : 20000;
+      // 台北市 JSON 結構較大，Web 端極限縮減至 2000 筆以確保代理連線不中斷
+      int limit = kIsWeb ? 2000 : 20000;
       String targetUrl = '$routeUrl&limit=$limit';
       
       String? body;
