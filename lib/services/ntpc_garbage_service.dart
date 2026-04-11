@@ -82,6 +82,7 @@ class NtpcGarbageService extends BaseGarbageService {
   static const String routeUrl = 'https://data.ntpc.gov.tw/api/datasets/edc3ad26-8ae7-4916-a00b-bc6048d19bf8/csv';
   
   static const String requiredAssetVersion = '20260411_v2'; 
+  int _pageIndex = 0;
 
   static const Map<String, String> _headers = {
     'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36',
@@ -164,16 +165,23 @@ class NtpcGarbageService extends BaseGarbageService {
   @override
   Future<List<GarbageTruck>> fetchTrucks() async {
     try {
-      // 再次調降筆數至 5000，確保與台北市一致的穩定傳輸體積
-      int size = kIsWeb ? 5000 : 20000;
       String baseApiUrl = 'https://data.ntpc.gov.tw/api/datasets/28ab4122-60e1-4065-98e5-abccb69aaca6/json';
-      String req = '$baseApiUrl?size=$size&_t=${DateTime.now().millisecondsSinceEpoch}';
-      
       String? body;
+
       if (kIsWeb) {
-        // 新北市反應較慢，Web 代理超時放寬至 25 秒
-        body = await webFetch(_client, req, timeout: 25);
+        // [PWA 策略]：分頁輪詢。
+        // 新北市資料約 20,000 筆，我們每次抓取一頁 3,000 筆，分 7 輪跑完。
+        // 這樣每輪資料量約 1MB，Proxy 傳輸極其穩定。
+        int pageSize = 3000;
+        String req = '$baseApiUrl?size=$pageSize&page=$_pageIndex&_t=${DateTime.now().millisecondsSinceEpoch}';
+        
+        DatabaseService.log('新北 PWA 輪詢頁面: $_pageIndex');
+        _pageIndex = (_pageIndex + 1) % 7; // 輪轉 0-6 頁
+        
+        body = await webFetch(_client, req, timeout: 20);
       } else {
+        // Native 模式維持全量抓取 (20000 筆)
+        String req = '$baseApiUrl?size=20000&_t=${DateTime.now().millisecondsSinceEpoch}';
         final res = await _client.get(Uri.parse(req), headers: _headers).timeout(const Duration(seconds: 15));
         if (res.statusCode == 200) body = res.body;
       }

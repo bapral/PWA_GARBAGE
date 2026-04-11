@@ -88,6 +88,13 @@ class TaipeiGarbageService extends BaseGarbageService {
   static const String routeUrl = 'https://data.taipei/api/v1/dataset/a6e90031-7ec4-4089-afb5-361a4efe7202?scope=resourceAquire';
   static const String truckUrl = 'https://data.taipei/api/v1/dataset/d394142f-7634-4b4f-8b54-7f4f6e63289a?scope=resourceAcknowledge';
 
+  // 台北市行政區清單，用於分區輪詢
+  static const List<String> _districts = [
+    '松山區', '信義區', '大安區', '中山區', '中正區', '大同區', 
+    '萬華區', '文山區', '南港區', '內湖區', '士林區', '北投區'
+  ];
+  int _pollIndex = 0;
+
   // [重要] 資產版本號，每次更新 assets/*.json 後增加此數字可強制所有使用者升級
   static const String requiredAssetVersion = '20260411_v4'; 
 
@@ -175,24 +182,31 @@ class TaipeiGarbageService extends BaseGarbageService {
   @override
   Future<List<GarbageTruck>> fetchTrucks() async {
     try {
-      // 台北市資料較密集，5000 筆可覆蓋大部分熱門區域
-      int limit = kIsWeb ? 5000 : 20000;
-      String targetUrl = '$routeUrl&limit=$limit';
+      String targetUrl;
       
-      String? body;
       if (kIsWeb) {
-        body = await webFetch(_client, targetUrl, timeout: 20);
+        // [PWA 策略]：分區輪詢。每次抓取 3 個行政區，確保資料量極小 (約數百KB) 且 Proxy 極速穩定。
+        final d1 = _districts[_pollIndex % _districts.length];
+        final d2 = _districts[(_pollIndex + 1) % _districts.length];
+        final d3 = _districts[(_pollIndex + 2) % _districts.length];
+        _pollIndex = (_pollIndex + 3) % _districts.length;
+        
+        targetUrl = '$routeUrl&limit=2000&q=$d1 $d2 $d3'; 
+        DatabaseService.log('台北 PWA 輪詢區域: $d1, $d2, $d3');
+        
+        String? body = await webFetch(_client, targetUrl, timeout: 15);
+        if (body != null && body.isNotEmpty) {
+          final List<GarbageTruck> allTrucks = await compute(_parseTaipeiTrucksIsolate, _TaipeiTruckParseInput(body));
+          if (allTrucks.isNotEmpty) return allTrucks;
+        }
       } else {
+        // Native 模式維持全量抓取 (20000 筆)
+        targetUrl = '$routeUrl&limit=20000';
         final response = await _client.get(Uri.parse(targetUrl)).timeout(const Duration(seconds: 15));
-        if (response.statusCode == 200) body = response.body;
-      }
-
-      if (body != null && body.isNotEmpty) {
-        final List<GarbageTruck> allTrucks = await compute(
-          _parseTaipeiTrucksIsolate, 
-          _TaipeiTruckParseInput(body)
-        );
-        if (allTrucks.isNotEmpty) return allTrucks;
+        if (response.statusCode == 200) {
+          final List<GarbageTruck> allTrucks = await compute(_parseTaipeiTrucksIsolate, _TaipeiTruckParseInput(response.body));
+          if (allTrucks.isNotEmpty) return allTrucks;
+        }
       }
     } catch (e) {
       DatabaseService.log('Taipei Realtime Fetch Failed', error: e);
