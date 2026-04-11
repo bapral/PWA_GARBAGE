@@ -242,45 +242,45 @@ class _MapScreenState extends ConsumerState<MapScreen> {
 
     return Scaffold(
       appBar: AppBar(
-        title: InkWell(
-          onTap: () {
-            // 點擊 AppBar 標題可快速切換定位模式
-            ref.read(locationModeProvider.notifier).toggle();
-            final newMode = ref.read(locationModeProvider);
-            DatabaseService.log('切換定位模式: $newMode');
-            _clearAllPolylines();
-            ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-              content: Text(newMode == LocationMode.auto ? '已切換為：自動 GPS 定位' : '已切換為：手動指定地點 (請點擊地圖)'),
-              duration: const Duration(seconds: 2),
-            ));
-          },
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Row(
-                children: [
-                  Text(config.appTitle, style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18, color: appBarTitleColor)),
-                  const SizedBox(width: 5),
-                  Icon(locationMode == LocationMode.auto ? Icons.gps_fixed : Icons.edit_location_alt, size: 16, color: appBarSubtitleColor),
-                ],
-              ),
-              Consumer(
-                builder: (context, ref, child) {
-                  final count = ref.watch(routeDataCountProvider);
-                  final sourceInfo = ref.watch(sourceInfoProvider);
-                  return SelectionArea(
-                    child: Column(
+        title: SelectionArea(
+          child: InkWell(
+            onTap: () {
+              // 點擊 AppBar 標題可快速切換定位模式
+              ref.read(locationModeProvider.notifier).toggle();
+              final newMode = ref.read(locationModeProvider);
+              DatabaseService.log('切換定位模式: $newMode');
+              _clearAllPolylines();
+              ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+                content: Text(newMode == LocationMode.auto ? '已切換為：自動 GPS 定位' : '已切換為：手動指定地點 (請點擊地圖)'),
+                duration: const Duration(seconds: 2),
+              ));
+            },
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    Text(config.appTitle, style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18, color: appBarTitleColor)),
+                    const SizedBox(width: 5),
+                    Icon(locationMode == LocationMode.auto ? Icons.gps_fixed : Icons.edit_location_alt, size: 16, color: appBarSubtitleColor),
+                  ],
+                ),
+                Consumer(
+                  builder: (context, ref, child) {
+                    final count = ref.watch(routeDataCountProvider);
+                    final sourceInfo = ref.watch(sourceInfoProvider);
+                    return Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         Text('快取資料: $count 筆 | 模式: ${locationMode == LocationMode.auto ? "自動 GPS" : "手動指定"}', 
                           style: TextStyle(fontSize: 11, color: appBarSubtitleColor)),
                         Text(sourceInfo, style: TextStyle(fontSize: 10, color: appBarSubtitleColor, fontWeight: FontWeight.bold)),
                       ],
-                    ),
-                  );
-                },
-              ),
-            ],
+                    );
+                  },
+                ),
+              ],
+            ),
           ),
         ),
         backgroundColor: config.themeColor[800],
