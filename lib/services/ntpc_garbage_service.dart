@@ -159,37 +159,51 @@ class NtpcGarbageService extends BaseGarbageService {
   @override
   Future<List<GarbageTruck>> fetchTrucks() async {
     try {
-      String req = '$apiUrl?size=20000&_t=${DateTime.now().millisecondsSinceEpoch}';
+      // 改用 JSON 格式以提升 PWA 解析相容性
+      String baseApiUrl = 'https://data.ntpc.gov.tw/api/datasets/28ab4122-60e1-4065-98e5-abccb69aaca6/json';
+      String req = '$baseApiUrl?size=20000&_t=${DateTime.now().millisecondsSinceEpoch}';
       
-      // Web 環境專用的 CORS Proxy 處理
+      String body = '';
       if (kIsWeb) {
-        // [修正]：allorigins.win 的 /raw 端點有時會因為 Header 問題被封鎖
-        // 嘗試使用更穩定的 Proxy 呼叫方式
-        req = 'https://api.allorigins.win/get?url=' + Uri.encodeComponent(req);
-        final res = await _client.get(Uri.parse(req)).timeout(const Duration(seconds: 15));
-        
-        if (res.statusCode == 200) {
-          final Map<String, dynamic> jsonData = json.decode(res.body);
-          final String csvContent = jsonData['contents'] ?? '';
-          
-          if (csvContent.isNotEmpty) {
-            final List<List<dynamic>> rows = const CsvToListConverter(shouldParseNumbers: false, eol: '\n').convert(csvContent.trim());
-            if (rows.isNotEmpty) {
-              final header = rows[0].map((e) => e.toString().toLowerCase().trim()).toList();
-              return await compute(_parseNtpcTrucksIsolate, _NtpcTruckParseInput(csvContent, header));
-            }
+        // [策略]：優先使用 corsproxy.io (速度快且支援大數據)，失敗則嘗試 allorigins
+        try {
+          final webUrl = 'https://corsproxy.io/?' + Uri.encodeComponent(req);
+          final res = await _client.get(Uri.parse(webUrl)).timeout(const Duration(seconds: 12));
+          if (res.statusCode == 200) {
+            body = res.body;
+          }
+        } catch (_) {
+          // 備援方案
+          final backupUrl = 'https://api.allorigins.win/get?url=' + Uri.encodeComponent(req);
+          final res = await _client.get(Uri.parse(backupUrl)).timeout(const Duration(seconds: 15));
+          if (res.statusCode == 200) {
+            body = json.decode(res.body)['contents'] ?? '';
           }
         }
       } else {
-        // 原本的 Native 請求邏輯
+        // Native 模式維持原樣
         final res = await _client.get(Uri.parse(req), headers: _headers).timeout(const Duration(seconds: 10));
-        if (res.statusCode == 200) {
-          final List<List<dynamic>> rows = const CsvToListConverter(shouldParseNumbers: false, eol: '\n').convert(res.body.trim());
-          if (rows.isNotEmpty) {
-            final header = rows[0].map((e) => e.toString().toLowerCase().trim()).toList();
-            return await compute(_parseNtpcTrucksIsolate, _NtpcTruckParseInput(res.body, header));
+        if (res.statusCode == 200) body = res.body;
+      }
+
+      if (body.isNotEmpty) {
+        final List<dynamic> data = json.decode(body);
+        List<GarbageTruck> trucks = [];
+        for (var item in data) {
+          final double? lat = double.tryParse(item['latitude']?.toString() ?? '');
+          final double? lng = double.tryParse(item['longitude']?.toString() ?? '');
+          if (lat != null && lng != null && lat > 22 && lat < 26) {
+            trucks.add(GarbageTruck(
+              carNumber: (item['car'] ?? '未知').toString(),
+              lineId: (item['lineid'] ?? '').toString(),
+              location: (item['location'] ?? '行駛中').toString(),
+              position: LatLng(lat, lng),
+              updateTime: DateTime.tryParse(item['time']?.toString() ?? '') ?? DateTime.now(),
+              isRealTime: true,
+            ));
           }
         }
+        if (trucks.isNotEmpty) return trucks;
       }
     } catch (e) {
       DatabaseService.log('Ntpc Realtime Fetch Failed', error: e);
