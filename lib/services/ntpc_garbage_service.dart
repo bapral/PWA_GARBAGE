@@ -15,6 +15,7 @@ import 'package:flutter/services.dart' show rootBundle;
 import 'package:flutter/foundation.dart';
 
 import 'base_garbage_service.dart';
+import '../utils/time_utils.dart';
 
 /// 在獨立 Isolate 中執行的 CSV 解析函式。
 List<GarbageRoutePoint> _parseCsvIsolate(_CsvParseInput input) {
@@ -51,7 +52,7 @@ List<GarbageRoutePoint> _parseCsvIsolate(_CsvParseInput input) {
       rank: idxRank != -1 ? (int.tryParse(row[idxRank].toString()) ?? 0) : i,
       name: idxName != -1 ? row[idxName].toString() : '',
       position: LatLng(lat, lng),
-      arrivalTime: row[idxTime].toString(),
+      arrivalTime: TimeUtils.formatTo24Hour(row[idxTime].toString()),
     ));
   }
   return result;

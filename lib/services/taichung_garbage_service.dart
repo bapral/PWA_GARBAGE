@@ -10,6 +10,7 @@ import '../models/garbage_truck.dart';
 import '../models/garbage_route_point.dart';
 import 'database_service.dart';
 import 'base_garbage_service.dart';
+import '../utils/time_utils.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 import 'package:flutter/services.dart' show rootBundle;
 import 'package:flutter/foundation.dart';
@@ -98,25 +99,13 @@ class TaichungGarbageService extends BaseGarbageService {
         }
         if (rawTime.isEmpty) continue;
 
-        // [指南要求]：處理 ISO T 格式 (20240411T093000 -> 09:30)
-        String arrivalTime = rawTime;
-        if (rawTime.contains('T')) {
-          try {
-            final tPart = rawTime.split('T')[1]; // 093000
-            arrivalTime = '${tPart.substring(0, 2)}:${tPart.substring(2, 4)}';
-          } catch (_) {}
-        } else if (rawTime.length == 4 && !rawTime.contains(':')) {
-          arrivalTime = '${rawTime.substring(0, 2)}:${rawTime.substring(2, 4)}';
-        }
-
-        LatLng pos = carPositions[carNo] ?? const LatLng(24.147, 120.673);
         allPoints.add(GarbageRoutePoint(
           lineId: carNo,
           lineName: '${item['area'] ?? ''}${item['village'] ?? ''} ($carNo)',
           rank: i,
           name: item['caption']?.toString() ?? '未知站點',
-          position: pos,
-          arrivalTime: arrivalTime,
+          position: carPositions[carNo] ?? const LatLng(24.147, 120.673),
+          arrivalTime: TimeUtils.formatTo24Hour(rawTime),
         ));
       }
       

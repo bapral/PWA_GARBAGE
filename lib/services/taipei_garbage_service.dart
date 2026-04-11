@@ -12,6 +12,7 @@ import '../models/garbage_truck.dart';
 import '../models/garbage_route_point.dart';
 import 'database_service.dart';
 import 'base_garbage_service.dart';
+import '../utils/time_utils.dart';
 import 'package:flutter/services.dart' show rootBundle;
 
 /// 內部使用的解析封裝物件，用於台北市 Isolate 溝通。
@@ -35,14 +36,9 @@ List<GarbageRoutePoint> _parseTaipeiJsonIsolate(_TaipeiParseInput input) {
   for (var item in results) {
     final double? lat = double.tryParse(item['緯度']?.toString() ?? item['latitude']?.toString() ?? '');
     final double? lng = double.tryParse(item['經度']?.toString() ?? item['longitude']?.toString() ?? '');
-    String time = (item['抵達時間'] ?? item['time'] ?? '').toString();
+    String timeRaw = (item['抵達時間'] ?? item['time'] ?? '').toString();
     
-    // [指南要求]：處理時間格式，將 "2030" 轉換為 "20:30"
-    if (time.length == 4 && !time.contains(':')) {
-      time = '${time.substring(0, 2)}:${time.substring(2, 4)}';
-    }
-
-    if (lat != null && lng != null && time.isNotEmpty) {
+    if (lat != null && lng != null && timeRaw.isNotEmpty) {
       // [指南要求]：座標範圍驗證 (22-26, 120-122)
       if (lat < 22 || lat > 26 || lng < 120 || lng > 122) continue;
 
@@ -50,13 +46,13 @@ List<GarbageRoutePoint> _parseTaipeiJsonIsolate(_TaipeiParseInput input) {
       final String carNo = (item['車號'] ?? item['car'] ?? '').toString();
 
       points.add(GarbageRoutePoint(
-        // [指南要求]：台北市使用「路線名稱 + 車號」作為唯一識別，避免同一路線多台車造成跳動
+        // [指南要求]：台北市使用「路線名稱 + 車號」作為唯一識別
         lineId: carNo.isNotEmpty ? '$lineName ($carNo)' : lineName,
         lineName: lineName,
         rank: int.tryParse(item['序號']?.toString() ?? item['rank']?.toString() ?? '0') ?? 0,
         name: (item['地點名稱'] ?? item['name'] ?? '').toString(),
         position: LatLng(lat, lng),
-        arrivalTime: time,
+        arrivalTime: TimeUtils.formatTo24Hour(timeRaw),
       ));
     }
   }
@@ -95,7 +91,6 @@ class TaipeiGarbageService extends BaseGarbageService {
     onProgress?.call('正在初始化台北市資料更新...');
     
     try {
-      // [指南要求]：台北市請求必須包含 limit=20000 否則資料不全
       String targetUrl = routeUrl + '&limit=20000';
       if (kIsWeb) {
         targetUrl = 'https://api.allorigins.win/raw?url=' + Uri.encodeComponent(targetUrl);
@@ -159,7 +154,6 @@ class TaipeiGarbageService extends BaseGarbageService {
   @override
   Future<List<GarbageTruck>> fetchTrucks() async {
     try {
-      // 即時 API 同樣建議加 limit
       String targetUrl = truckUrl + '&limit=1000';
       if (kIsWeb) {
         targetUrl = 'https://api.allorigins.win/raw?url=' + Uri.encodeComponent(targetUrl);
@@ -175,7 +169,6 @@ class TaipeiGarbageService extends BaseGarbageService {
           final double? lng = double.tryParse(item['經度']?.toString() ?? '0');
           
           if (lat != null && lng != null) {
-            // 座標合法性檢查
             if (lat < 22 || lat > 26 || lng < 120 || lng > 122) continue;
 
             final String lineName = (item['路線名稱'] ?? '').toString();
@@ -183,7 +176,6 @@ class TaipeiGarbageService extends BaseGarbageService {
 
             trucks.add(GarbageTruck(
               carNumber: carNo,
-              // [指南要求]：即時資料也採用複合 Key 邏輯
               lineId: carNo != '未知' ? '$lineName ($carNo)' : lineName,
               location: (item['位置描述'] ?? '').toString(),
               position: LatLng(lat, lng),

@@ -10,6 +10,7 @@ import '../models/garbage_truck.dart';
 import '../models/garbage_route_point.dart';
 import 'database_service.dart';
 import 'base_garbage_service.dart';
+import '../utils/time_utils.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart' show rootBundle;
@@ -135,7 +136,7 @@ class KaohsiungGarbageService extends BaseGarbageService {
           rank: i,
           name: name,
           position: LatLng(lat, lng),
-          arrivalTime: timeStr,
+          arrivalTime: TimeUtils.formatTo24Hour(timeRaw),
         ));
       }
     }

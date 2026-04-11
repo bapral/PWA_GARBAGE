@@ -10,6 +10,7 @@ import '../models/garbage_truck.dart';
 import '../models/garbage_route_point.dart';
 import 'database_service.dart';
 import 'base_garbage_service.dart';
+import '../utils/time_utils.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart' show rootBundle;
@@ -73,7 +74,7 @@ class TainanGarbageService extends BaseGarbageService {
               rank: int.tryParse(item['ROUTEORDER']?.toString() ?? '') ?? i,
               name: item['POINTNAME']?.toString() ?? '未知站點',
               position: LatLng(lat, lng),
-              arrivalTime: item['TIME']?.toString() ?? '',
+              arrivalTime: TimeUtils.formatTo24Hour(item['TIME']?.toString() ?? ''),
             ));
           }
         }
