@@ -30,7 +30,7 @@ class TaichungGarbageService extends BaseGarbageService {
   static const String dynamicApiUrl = 'https://newdatacenter.taichung.gov.tw/api/v1/no-auth/resource.download?rid=c923ad20-2ec6-43b9-b3ab-54527e99f7bc';
 
   // [重要] 資產版本號，用於強制更新本地 SQLite 資料庫
-  static const String requiredAssetVersion = '20260411_v3'; 
+  static const String requiredAssetVersion = '20260413_v1'; 
 
   final DatabaseService _dbService = DatabaseService();
   final http.Client _client;
