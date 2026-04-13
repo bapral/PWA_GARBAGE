@@ -211,8 +211,14 @@ class DatabaseService {
   /// 輔助函式：計算時間位移。
   String _offsetTime(int h, int m, int offset) {
     int total = h * 60 + m + offset;
-    if (total < 0) total = 0; if (total > 1439) total = 1439;
-    return '${(total ~/ 60).toString().padLeft(2, '0')}:${(total % 60).toString().padLeft(2, '0')}';
+    // 處理跨日問題 (循環 24 小時)
+    if (total < 0) total += 1440;
+    if (total >= 1440) total -= 1440;
+    
+    final int newH = total ~/ 60;
+    final int newM = total % 60;
+    
+    return '${newH.toString().padLeft(2, '0')}:${newM.toString().padLeft(2, '0')}';
   }
 
   /// 獲取單一路線的所有順序點位。

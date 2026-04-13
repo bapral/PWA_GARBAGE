@@ -42,11 +42,28 @@ List<GarbageRoutePoint> _parseCsvIsolate(_CsvParseInput input) {
     final double lat = double.tryParse(row[idxLat].toString()) ?? 0;
     final double lng = double.tryParse(row[idxLng].toString()) ?? 0;
     if (lat < 22 || lat > 26 || lng < 120 || lng > 122) continue;
+    final String timeStr = row[idxTime].toString();
+    final String lineName = idxLineName != -1 ? row[idxLineName].toString() : '';
+    
+    // 預解析時間以便進行智慧判斷
+    String finalTime = TimeUtils.formatTo24Hour(timeStr);
+    
+    // [智慧校正]：若路線名稱明確標示為「下午」或「晚上」，但時間卻落在 12 點以前
+    if (lineName.contains('下午') || lineName.contains('晚上')) {
+      final parts = finalTime.split(':');
+      int h = int.tryParse(parts[0]) ?? 0;
+      if (h > 0 && h < 12) {
+        finalTime = '${(h + 12).toString().padLeft(2, '0')}:${parts[1]}';
+      }
+    }
+
     result.add(GarbageRoutePoint(
-      lineId: row[idxLineId].toString(), lineName: idxLineName != -1 ? row[idxLineName].toString() : '',
+      lineId: row[idxLineId].toString(), 
+      lineName: lineName,
       rank: idxRank != -1 ? (int.tryParse(row[idxRank].toString()) ?? 0) : i,
-      name: idxName != -1 ? row[idxName].toString() : '', position: LatLng(lat, lng),
-      arrivalTime: TimeUtils.formatTo24Hour(row[idxTime].toString()),
+      name: idxName != -1 ? row[idxName].toString() : '', 
+      position: LatLng(lat, lng),
+      arrivalTime: finalTime,
     ));
   }
   return result;
@@ -90,7 +107,7 @@ class NtpcGarbageService extends BaseGarbageService {
   static const String apiUrl = 'https://data.ntpc.gov.tw/api/datasets/28ab4122-60e1-4065-98e5-abccb69aaca6/csv';
   static const String routeUrl = 'https://data.ntpc.gov.tw/api/datasets/edc3ad26-8ae7-4916-a00b-bc6048d19bf8/csv';
   
-  static const String requiredAssetVersion = '20260411_v2'; 
+  static const String requiredAssetVersion = '20260414_v1'; 
   int _pageIndex = 0;
 
   static const Map<String, String> _headers = {
