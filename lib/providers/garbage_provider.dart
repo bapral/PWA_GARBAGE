@@ -88,7 +88,7 @@ final currentCityConfigProvider = Provider<CityConfig>((ref) {
     return CityConfig(
       cityName: 'taipei',
       appTitle: '台北市垃圾車即時地圖',
-      initialCenter: const LatLng(25.0330, 121.5654),
+      initialCenter: const LatLng(25.0375, 121.5637),
       themeColor: Colors.blue,
       localSourceDir: 'assets/taipei_route.json',
     );
@@ -96,7 +96,7 @@ final currentCityConfigProvider = Provider<CityConfig>((ref) {
     return CityConfig(
       cityName: 'taichung',
       appTitle: '台中市垃圾車即時地圖',
-      initialCenter: const LatLng(24.1477, 120.6736),
+      initialCenter: const LatLng(24.1477, 120.6412),
       themeColor: Colors.green,
       localSourceDir: 'assets/taichung_route.json',
     );
@@ -104,7 +104,7 @@ final currentCityConfigProvider = Provider<CityConfig>((ref) {
     return CityConfig(
       cityName: 'tainan',
       appTitle: '台南市垃圾車即時地圖',
-      initialCenter: const LatLng(22.9975, 120.2025),
+      initialCenter: const LatLng(22.9912, 120.1850),
       themeColor: Colors.orange,
       localSourceDir: 'assets/tainan_route.json',
     );
@@ -112,7 +112,7 @@ final currentCityConfigProvider = Provider<CityConfig>((ref) {
     return CityConfig(
       cityName: 'kaohsiung',
       appTitle: '高雄市垃圾車即時地圖',
-      initialCenter: const LatLng(22.6273, 120.3014),
+      initialCenter: const LatLng(22.6208, 120.3120),
       themeColor: Colors.purple,
       localSourceDir: 'assets/kaohsiung_route.json',
     );
@@ -120,7 +120,7 @@ final currentCityConfigProvider = Provider<CityConfig>((ref) {
   return CityConfig(
     cityName: 'ntpc',
     appTitle: '新北市垃圾車即時地圖',
-    initialCenter: const LatLng(25.0125, 121.4650),
+    initialCenter: const LatLng(25.0123, 121.4657),
     themeColor: Colors.yellow,
     localSourceDir: 'assets/ntpc_route.csv',
   );

@@ -199,6 +199,19 @@ class _MapScreenState extends ConsumerState<MapScreen> {
     final targetTime = ref.watch(targetTimeProvider);
     final locationMode = ref.watch(locationModeProvider);
     final manualPos = ref.watch(manualPositionProvider);
+
+    // [新增]：監聽城市配置變更，自動移動視角
+    ref.listen<CityConfig>(currentCityConfigProvider, (previous, next) {
+      if (previous?.cityName != next.cityName && _isMapReady) {
+        DatabaseService.log('偵測到城市切換: ${next.cityName}，移動視野至中心點');
+        _clearAllPolylines();
+        try {
+          _mapController.move(next.initialCenter, 14.0);
+        } catch (e) {
+          debugPrint('MapController 自動移動失敗: $e');
+        }
+      }
+    });
     
     // 判斷目前的顯示狀態 (即時、相對預測、絕對時間)
     bool isAbsolute = targetTime != null;
