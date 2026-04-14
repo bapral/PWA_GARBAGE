@@ -277,7 +277,14 @@ class GarbageTrucksNotifier extends Notifier<List<GarbageTruck>> {
     state = []; // 切換城市時先清空列表
     
     Future.microtask(() async {
+      final config = ref.read(currentCityConfigProvider);
       final service = ref.read(garbageServiceProvider);
+      
+      // [新增]：切換城市時自動切換至手動模式，並定點在該市中心
+      DatabaseService.log('城市切換連動：設定模式為手動，位置為 ${config.cityName} 中心點');
+      ref.read(locationModeProvider.notifier).state = LocationMode.manual;
+      ref.read(manualPositionProvider.notifier).setPosition(config.initialCenter);
+
       ref.read(isSyncingProvider.notifier).setSyncing(true);
       try {
         // [修改]：正常啟動時 force 設為 false，僅在必要時從 Assets 載入
