@@ -17,6 +17,7 @@ import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:flutter/foundation.dart';
+import '../models/city_config.dart';
 import '../providers/garbage_provider.dart';
 import '../models/garbage_truck.dart';
 import '../services/database_service.dart';

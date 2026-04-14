@@ -62,9 +62,16 @@ class TimeUtils {
       }
     }
 
-    // 根據 AM/PM 修正小時
+    // 根據 AM/PM 修正小時 (增加防呆：若 hour 已經 >= 12 則不重複加 12)
     if (isPM && hour < 12) hour += 12;
     if (isAM && hour == 12) hour = 0;
+    
+    // 特殊防呆：如果原始資料是 24 小時制 (例如 19:30) 卻又被誤標 PM
+    // 目前邏輯已由 hour < 12 擋下。但若 hour > 23 則強制修正。
+    if (hour > 23) {
+      if (isPM) hour -= 12; // 可能是重複加了兩次
+      if (hour > 23) hour = 23; 
+    }
 
     // 確保範圍合法
     if (hour < 0) hour = 0; if (hour > 23) hour = 23;

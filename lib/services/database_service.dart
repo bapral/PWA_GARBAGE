@@ -88,6 +88,15 @@ class DatabaseService {
           await db.execute('CREATE INDEX idx_time ON $tableName (arrivalTime)');
           await db.execute('CREATE INDEX idx_city ON $tableName (city)');
         },
+        onUpgrade: (db, oldVersion, newVersion) async {
+          if (oldVersion < 2) {
+            // 處理舊版本升級，若缺少 city 欄位則新增
+            try {
+              await db.execute('ALTER TABLE $tableName ADD COLUMN city TEXT');
+              await db.execute('CREATE INDEX idx_city ON $tableName (city)');
+            } catch (_) {}
+          }
+        },
       );
     } catch (e) {
       await log('資料庫初始化崩潰，改用記憶體資料庫', error: e);
@@ -197,6 +206,8 @@ class DatabaseService {
     final String start = _offsetTime(hour, minute, beforeOffset);
     final String end = _offsetTime(hour, minute, afterOffset);
     
+    DatabaseService.log('資料庫查詢: 城市=$city, 時間窗口=$start ~ $end');
+
     final List<Map<String, dynamic>> maps = await database.query(
       tableName, 
       where: "arrivalTime >= ? AND arrivalTime <= ? AND city = ?", 

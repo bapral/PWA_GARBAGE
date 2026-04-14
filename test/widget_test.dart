@@ -8,23 +8,23 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:ntpc_garbage_map/main.dart';
 
 void main() {
   testWidgets('Counter increments smoke test', (WidgetTester tester) async {
     // Build our app and trigger a frame.
-    await tester.pumpWidget(const MyApp());
+    await tester.pumpWidget(const ProviderScope(child: GarbageMapApp()));
+    
+    // 等待初始化動畫與非同步操作完成
+    await tester.pumpAndSettle(const Duration(seconds: 2));
 
-    // Verify that our counter starts at 0.
-    expect(find.text('0'), findsOneWidget);
-    expect(find.text('1'), findsNothing);
-
-    // Tap the '+' icon and trigger a frame.
-    await tester.tap(find.byIcon(Icons.add));
-    await tester.pump();
-
-    // Verify that our counter has incremented.
-    expect(find.text('0'), findsNothing);
-    expect(find.text('1'), findsOneWidget);
+    // 檢查標題或初始化文字是否出現
+    expect(
+      find.byWidgetPredicate((widget) => 
+        widget is Text && (widget.data?.contains('新北市') == true || widget.data?.contains('初始化') == true)
+      ), 
+      findsWidgets
+    );
   });
 }

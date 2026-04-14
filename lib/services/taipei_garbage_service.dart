@@ -194,14 +194,9 @@ class TaipeiGarbageService extends BaseGarbageService {
       String targetUrl;
       
       if (kIsWeb) {
-        // [PWA 策略]：分區輪詢。每次抓取 3 個行政區，確保資料量極小 (約數百KB) 且 Proxy 極速穩定。
-        final d1 = _districts[_pollIndex % _districts.length];
-        final d2 = _districts[(_pollIndex + 1) % _districts.length];
-        final d3 = _districts[(_pollIndex + 2) % _districts.length];
-        _pollIndex = (_pollIndex + 3) % _districts.length;
-        
-        targetUrl = '$routeUrl&limit=2000&q=$d1 $d2 $d3'; 
-        DatabaseService.log('台北 PWA 輪詢區域: $d1, $d2, $d3');
+        // [PWA 策略]：改用 truckUrl 獲取真正即時位置。
+        // 移除行政區過濾，因為即時 API 可能不支援 q 參數過濾地點。
+        targetUrl = '$truckUrl&limit=1000'; 
         
         String? body = await webFetch(_client, targetUrl, timeout: 15);
         if (body != null && body.isNotEmpty) {
@@ -209,8 +204,8 @@ class TaipeiGarbageService extends BaseGarbageService {
           if (allTrucks.isNotEmpty) return allTrucks;
         }
       } else {
-        // Native 模式維持全量抓取 (20000 筆)
-        targetUrl = '$routeUrl&limit=20000';
+        // Native 模式：使用 truckUrl 獲取全量即時位置
+        targetUrl = '$truckUrl&limit=5000';
         final response = await _client.get(Uri.parse(targetUrl)).timeout(const Duration(seconds: 15));
         if (response.statusCode == 200) {
           final List<GarbageTruck> allTrucks = await compute(_parseTaipeiTrucksIsolate, _TaipeiTruckParseInput(response.body));
@@ -220,13 +215,49 @@ class TaipeiGarbageService extends BaseGarbageService {
     } catch (e) {
       DatabaseService.log('Taipei Realtime Fetch Failed', error: e);
     }
+    // 若 API 失敗，回退至資料庫班表預測
     return await findTrucksByTime(DateTime.now().hour, DateTime.now().minute);
   }
 
   @override
   Future<List<GarbageTruck>> findTrucksByTime(int hour, int minute) async {
     final points = await _dbService.findPointsByTime(hour, minute, 'taipei');
-    return points.map((p) => GarbageTruck(carNumber: '預定車', lineId: p.lineId, location: p.name, position: p.position, updateTime: DateTime.now(), isRealTime: false)).toList();
+    
+    // [修正] 增加二次檢查，確保 arrivalTime 與目標時間差距在合理範圍內 (15分鐘)
+    // 防止資料庫查詢因索引或格式問題回傳錯誤時段的資料。
+    final int targetTotalMinutes = hour * 60 + minute;
+
+    return points.where((p) {
+      if (!p.arrivalTime.contains(':')) return false;
+      final parts = p.arrivalTime.split(':');
+      final h = int.tryParse(parts[0]) ?? -1;
+      final m = int.tryParse(parts[1]) ?? -1;
+      if (h == -1 || m == -1) return false;
+      
+      final int pointTotalMinutes = h * 60 + m;
+      final int diff = (pointTotalMinutes - targetTotalMinutes).abs();
+      // 處理跨日循環差異 (例如 23:55 vs 00:05)
+      final int circularDiff = diff > 720 ? 1440 - diff : diff;
+      
+      return circularDiff <= 20; // 僅允許正負 20 分鐘內的班表，防止 19:36 出現在 21:35
+    }).map((p) {
+      int h = 0; int m = 0;
+      final parts = p.arrivalTime.split(':');
+      h = int.tryParse(parts[0]) ?? 0;
+      m = int.tryParse(parts[1]) ?? 0;
+      
+      final now = DateTime.now();
+      final scheduleDate = DateTime(now.year, now.month, now.day, h, m);
+
+      return GarbageTruck(
+        carNumber: '預定車', 
+        lineId: p.lineId, 
+        location: p.name, 
+        position: p.position, 
+        updateTime: scheduleDate, 
+        isRealTime: false
+      );
+    }).toList();
   }
 
   @override
