@@ -36,8 +36,12 @@ class CitySelectionNotifier extends Notifier<String> {
   String build() => 'ntpc';
   
   /// 設定當前選擇的城市。
-  /// [city] 城市代碼。
-  void setCity(String city) => state = city;
+  void setCity(String city) {
+    if (state != city) {
+      DatabaseService.log('CitySelectionNotifier: $state -> $city');
+      state = city;
+    }
+  }
 }
 
 /// 垃圾清運服務實體 Provider。
@@ -139,6 +143,14 @@ class LocationModeNotifier extends Notifier<LocationMode> {
   
   /// 切換目前的定位模式。
   void toggle() => state = (state == LocationMode.auto ? LocationMode.manual : LocationMode.auto);
+
+  /// 設定特定的定位模式。
+  void setMode(LocationMode mode) {
+    if (state != mode) {
+      DatabaseService.log('LocationMode: $state -> $mode');
+      state = mode;
+    }
+  }
 }
 
 /// 手動點擊設定的位置座標。
@@ -150,7 +162,6 @@ class ManualPositionNotifier extends Notifier<LatLng?> {
   LatLng? build() => null;
   
   /// 設定手動點擊的位置。
-  /// [pos] 經緯度座標。
   void setPosition(LatLng? pos) => state = pos;
 }
 
@@ -280,10 +291,10 @@ class GarbageTrucksNotifier extends Notifier<List<GarbageTruck>> {
       final config = ref.read(currentCityConfigProvider);
       final service = ref.read(garbageServiceProvider);
       
-      // [新增]：切換城市時自動切換至手動模式，並定點在該市中心
-      DatabaseService.log('城市切換連動：設定模式為手動，位置為 ${config.cityName} 中心點');
-      ref.read(locationModeProvider.notifier).state = LocationMode.manual;
+      // [修正]：使用 setMode 方法，並確保在同步前完成
+      ref.read(locationModeProvider.notifier).setMode(LocationMode.manual);
       ref.read(manualPositionProvider.notifier).setPosition(config.initialCenter);
+      DatabaseService.log('城市切換連動：已將模式設為手動，位置設為 ${config.cityName} 中心點');
 
       ref.read(isSyncingProvider.notifier).setSyncing(true);
       try {

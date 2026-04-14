@@ -681,25 +681,8 @@ class _MapScreenState extends ConsumerState<MapScreen> {
         DatabaseService.log('選取縣市: $cityKey ($label)');
         ref.read(citySelectionProvider.notifier).setCity(cityKey);
         Navigator.pop(context);
-        _onCityChanged();
       },
     );
-  }
-
-  /// 處理縣市變更後的 UI 回調。
-  /// 
-  /// 清除輔助線並將地圖中心點移動至新城市的預設中心。
-  void _onCityChanged() {
-    _clearAllPolylines();
-    final config = ref.read(currentCityConfigProvider);
-    DatabaseService.log('縣市已變更，嘗試移動地圖中心至: ${config.initialCenter}');
-    if (_isMapReady) {
-      try {
-        _mapController.move(config.initialCenter, 14.0);
-      } catch (e) {
-        debugPrint('MapController 移動失敗 (切換縣市): $e');
-      }
-    }
   }
 
   /// 顯示預測模式選擇選單。
