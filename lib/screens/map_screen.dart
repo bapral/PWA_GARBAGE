@@ -309,6 +309,12 @@ class _MapScreenState extends ConsumerState<MapScreen> {
         elevation: 4,
         actions: [
           IconButton(
+            icon: const Icon(Icons.help_outline),
+            onPressed: () => _showUserManualDialog(),
+            tooltip: '使用說明',
+            color: appBarTitleColor,
+          ),
+          IconButton(
             icon: const Icon(Icons.location_city),
             onPressed: () => _showCitySelectionDialog(),
             tooltip: '切換縣市',
@@ -847,6 +853,50 @@ class _MapScreenState extends ConsumerState<MapScreen> {
               const SizedBox(height: 20),
             ],
           ),
+        );
+      },
+    );
+  }
+
+  /// 顯示使用者操作手冊對話框。
+  /// 
+  /// 從 assets 讀取 USER_MANUAL.md 檔案並以對話框形式呈現。
+  void _showUserManualDialog() async {
+    DatabaseService.log('開啟使用說明對話框');
+    String content = '載入中...';
+    try {
+      content = await DefaultAssetBundle.of(context).loadString('USER_MANUAL.md');
+    } catch (e) {
+      content = '無法載入說明文件: $e';
+    }
+
+    if (!mounted) return;
+
+    showDialog(
+      context: context,
+      builder: (context) {
+        return AlertDialog(
+          title: const Row(
+            children: [
+              Icon(Icons.menu_book, color: Colors.orange),
+              SizedBox(width: 10),
+              Text('使用操作手冊'),
+            ],
+          ),
+          content: SizedBox(
+            width: double.maxFinite,
+            child: SingleChildScrollView(
+              child: SelectionArea(
+                child: Text(content, style: const TextStyle(fontSize: 14, height: 1.5)),
+              ),
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: const Text('我知道了'),
+            ),
+          ],
         );
       },
     );

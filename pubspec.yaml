@@ -66,6 +66,7 @@ flutter:
   # 定義專案內建的垃圾車班表資產
   # 當 API 無法連線時，系統會自動載入這些備援資料
   assets:
+    - USER_MANUAL.md
     - assets/ntpc_route.csv      # 新北市班表 (CSV 格式)
     - assets/taipei_route.json   # 台北市班表 (JSON 格式)
     - assets/taichung_route.json # 台中市班表 (JSON 格式)
