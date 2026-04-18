@@ -16,7 +16,7 @@ publish_to: 'none' # 本專案為私有開發，不發佈至 pub.dev
 
 # 版本號：主版本.次版本.修訂版+內部建置號
 # 每次發佈 Web 或 App 時建議增加內部建置號 (+ 之後的數字)
-version: 1.0.0+7
+version: 1.0.0+8
 
 environment:
   sdk: ^3.11.4 # 要求 Dart SDK 3.11.4 以上版本，以支援現代語言特性
