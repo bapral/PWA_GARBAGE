@@ -353,13 +353,14 @@ class _MapScreenState extends ConsumerState<MapScreen> {
             style: ElevatedButton.styleFrom(
               backgroundColor: locationMode == LocationMode.auto ? Colors.blue[900] : Colors.orange[900],
               foregroundColor: Colors.white,
-              elevation: 2,
+              elevation: 3,
+              side: BorderSide(color: appBarTitleColor.withValues(alpha: 0.8), width: 1.5), // 加入白色/淺色外框
               padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
               shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
             ),
             child: Text(
               locationMode == LocationMode.auto ? '自動定位' : '手動定位',
-              style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
+              style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13, letterSpacing: 0.5),
             ),
           ),
           const SizedBox(width: 12),
