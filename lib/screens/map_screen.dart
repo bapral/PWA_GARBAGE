@@ -263,7 +263,7 @@ class _MapScreenState extends ConsumerState<MapScreen> {
 
     return Scaffold(
       appBar: AppBar(
-        leadingWidth: 200,
+        leadingWidth: 220,
         leading: Row(
           children: [
             const SizedBox(width: 12),
@@ -339,6 +339,7 @@ class _MapScreenState extends ConsumerState<MapScreen> {
               const PopupMenuItem(value: 'update', child: Text('強制清除並更新資料庫')),
             ],
           ),
+          const VerticalDivider(width: 1, indent: 15, endIndent: 15, color: Colors.white24),
           TextButton(
             onPressed: () {
               ref.read(locationModeProvider.notifier).toggle();
@@ -350,9 +351,12 @@ class _MapScreenState extends ConsumerState<MapScreen> {
                 duration: const Duration(seconds: 2),
               ));
             },
-            child: Text(
-              locationMode == LocationMode.auto ? '自動定位' : '手動定位',
-              style: TextStyle(color: appBarTitleColor, fontWeight: FontWeight.bold),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 4.0),
+              child: Text(
+                locationMode == LocationMode.auto ? '自動定位' : '手動定位',
+                style: TextStyle(color: appBarTitleColor, fontWeight: FontWeight.bold, fontSize: 15),
+              ),
             ),
           ),
           const SizedBox(width: 8),
