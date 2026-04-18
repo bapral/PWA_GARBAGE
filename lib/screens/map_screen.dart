@@ -263,57 +263,60 @@ class _MapScreenState extends ConsumerState<MapScreen> {
 
     return Scaffold(
       appBar: AppBar(
-        title: SelectionArea(
-          child: InkWell(
-            onTap: () {
-              // 點擊 AppBar 標題可快速切換定位模式
-              ref.read(locationModeProvider.notifier).toggle();
-              final newMode = ref.read(locationModeProvider);
-              DatabaseService.log('切換定位模式: $newMode');
-              _clearAllPolylines();
-              ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-                content: Text(newMode == LocationMode.auto ? '已切換為：自動 GPS 定位' : '已切換為：手動指定地點 (請點擊地圖)'),
-                duration: const Duration(seconds: 2),
-              ));
-            },
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Row(
-                  children: [
-                    Text(config.appTitle, style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18, color: appBarTitleColor)),
-                    const SizedBox(width: 5),
-                    Icon(locationMode == LocationMode.auto ? Icons.gps_fixed : Icons.edit_location_alt, size: 16, color: appBarSubtitleColor),
-                  ],
-                ),
-                Consumer(
-                  builder: (context, ref, child) {
-                    final count = ref.watch(routeDataCountProvider);
-                    final sourceInfo = ref.watch(sourceInfoProvider);
-                    return Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text('快取資料: $count 筆 | 模式: ${locationMode == LocationMode.auto ? "自動 GPS" : "手動指定"}', 
-                          style: TextStyle(fontSize: 11, color: appBarSubtitleColor)),
-                        Text(sourceInfo, style: TextStyle(fontSize: 10, color: appBarSubtitleColor, fontWeight: FontWeight.bold)),
-                      ],
-                    );
-                  },
-                ),
-              ],
+        leadingWidth: 250,
+        leading: Row(
+          children: [
+            const SizedBox(width: 12),
+            InkWell(
+              onTap: () {
+                // 點擊 AppBar 標題或圖示可快速切換定位模式
+                ref.read(locationModeProvider.notifier).toggle();
+                final newMode = ref.read(locationModeProvider);
+                DatabaseService.log('切換定位模式: $newMode');
+                _clearAllPolylines();
+                ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+                  content: Text(newMode == LocationMode.auto ? '已切換為：自動 GPS 定位' : '已切換為：手動指定地點 (請點擊地圖)'),
+                  duration: const Duration(seconds: 2),
+                ));
+              },
+              child: Row(
+                children: [
+                  Text(config.appTitle, style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: appBarTitleColor)),
+                  const SizedBox(width: 4),
+                  Icon(locationMode == LocationMode.auto ? Icons.gps_fixed : Icons.edit_location_alt, size: 16, color: appBarSubtitleColor),
+                ],
+              ),
             ),
+            IconButton(
+              icon: const Icon(Icons.help_outline, size: 20),
+              onPressed: () => _showUserManualDialog(),
+              tooltip: '使用說明',
+              padding: EdgeInsets.zero,
+              constraints: const BoxConstraints(),
+              color: appBarTitleColor,
+            ),
+          ],
+        ),
+        centerTitle: true,
+        title: SelectionArea(
+          child: Consumer(
+            builder: (context, ref, child) {
+              final count = ref.watch(routeDataCountProvider);
+              final sourceInfo = ref.watch(sourceInfoProvider);
+              return Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(predictionText, style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: appBarTitleColor)),
+                  Text('$sourceInfo | 快取: $count', style: TextStyle(fontSize: 10, color: appBarSubtitleColor)),
+                ],
+              );
+            },
           ),
         ),
         backgroundColor: config.themeColor[800],
         iconTheme: IconThemeData(color: appBarTitleColor),
         elevation: 4,
         actions: [
-          IconButton(
-            icon: const Icon(Icons.help_outline),
-            onPressed: () => _showUserManualDialog(),
-            tooltip: '使用說明',
-            color: appBarTitleColor,
-          ),
           IconButton(
             icon: const Icon(Icons.location_city),
             onPressed: () => _showCitySelectionDialog(),
