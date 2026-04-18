@@ -263,30 +263,11 @@ class _MapScreenState extends ConsumerState<MapScreen> {
 
     return Scaffold(
       appBar: AppBar(
-        leadingWidth: 250,
+        leadingWidth: 200,
         leading: Row(
           children: [
             const SizedBox(width: 12),
-            InkWell(
-              onTap: () {
-                // 點擊 AppBar 標題或圖示可快速切換定位模式
-                ref.read(locationModeProvider.notifier).toggle();
-                final newMode = ref.read(locationModeProvider);
-                DatabaseService.log('切換定位模式: $newMode');
-                _clearAllPolylines();
-                ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-                  content: Text(newMode == LocationMode.auto ? '已切換為：自動 GPS 定位' : '已切換為：手動指定地點 (請點擊地圖)'),
-                  duration: const Duration(seconds: 2),
-                ));
-              },
-              child: Row(
-                children: [
-                  Text(config.appTitle, style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: appBarTitleColor)),
-                  const SizedBox(width: 4),
-                  Icon(locationMode == LocationMode.auto ? Icons.gps_fixed : Icons.edit_location_alt, size: 16, color: appBarSubtitleColor),
-                ],
-              ),
-            ),
+            Text(config.appTitle, style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: appBarTitleColor)),
             IconButton(
               icon: const Icon(Icons.help_outline, size: 20),
               onPressed: () => _showUserManualDialog(),
@@ -358,6 +339,23 @@ class _MapScreenState extends ConsumerState<MapScreen> {
               const PopupMenuItem(value: 'update', child: Text('強制清除並更新資料庫')),
             ],
           ),
+          TextButton(
+            onPressed: () {
+              ref.read(locationModeProvider.notifier).toggle();
+              final newMode = ref.read(locationModeProvider);
+              DatabaseService.log('切換定位模式: $newMode');
+              _clearAllPolylines();
+              ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+                content: Text(newMode == LocationMode.auto ? '已切換為：自動 GPS 定位' : '已切換為：手動指定地點 (請點擊地圖)'),
+                duration: const Duration(seconds: 2),
+              ));
+            },
+            child: Text(
+              locationMode == LocationMode.auto ? '自動定位' : '手動定位',
+              style: TextStyle(color: appBarTitleColor, fontWeight: FontWeight.bold),
+            ),
+          ),
+          const SizedBox(width: 8),
         ],
       ),
       body: trucksAsync.when(
