@@ -339,8 +339,7 @@ class _MapScreenState extends ConsumerState<MapScreen> {
               const PopupMenuItem(value: 'update', child: Text('強制清除並更新資料庫')),
             ],
           ),
-          const VerticalDivider(width: 1, indent: 15, endIndent: 15, color: Colors.white24),
-          TextButton(
+          ElevatedButton(
             onPressed: () {
               ref.read(locationModeProvider.notifier).toggle();
               final newMode = ref.read(locationModeProvider);
@@ -351,15 +350,19 @@ class _MapScreenState extends ConsumerState<MapScreen> {
                 duration: const Duration(seconds: 2),
               ));
             },
-            child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 4.0),
-              child: Text(
-                locationMode == LocationMode.auto ? '自動定位' : '手動定位',
-                style: TextStyle(color: appBarTitleColor, fontWeight: FontWeight.bold, fontSize: 15),
-              ),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: locationMode == LocationMode.auto ? Colors.blue[900] : Colors.orange[900],
+              foregroundColor: Colors.white,
+              elevation: 2,
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+            ),
+            child: Text(
+              locationMode == LocationMode.auto ? '自動定位' : '手動定位',
+              style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
             ),
           ),
-          const SizedBox(width: 8),
+          const SizedBox(width: 12),
         ],
       ),
       body: trucksAsync.when(
